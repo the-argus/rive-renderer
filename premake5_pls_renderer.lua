@@ -31,6 +31,11 @@ do
 end
 
 newoption({
+    trigger = 'with-kdgpu',
+    description = 'compile in support for vulkan via kdgpu',
+})
+
+newoption({
     trigger = 'with-dawn',
     description = 'compile in support for webgpu via dawn',
 })
@@ -95,7 +100,7 @@ do
         rebuildcommands({ makecommand .. ' rive_pls_ios_simulator_metallib' })
     end
 
-    filter({ 'options:with-dawn or with-webgpu' })
+    filter({ 'options:with-dawn or with-webgpu or with-kdgpu' })
     do
         buildcommands({ makecommand .. ' spirv' })
         rebuildcommands({ makecommand .. ' spirv' })
@@ -159,6 +164,15 @@ do
             'glad/glad.c',
             'glad/glad_custom.c',
         }) -- GL loader library for ANGLE.
+    end
+
+    -- NOTE: probably have some assert to make sure youre on windows/mac/linux
+    filter('options:with-kdgpu')
+    do
+        files({'renderer/kdgpu/pls_render_context_kdgpu_impl.cpp'})
+        cppdialect('C++20')
+        disablewarnings({ 'deprecated' }) -- some things are deprecated in c++20, this is not the intended version for some rive code
+        defines({ 'SPDLOG_FMT_EXTERNAL' }) -- premake5.lua handles linking but we need to restate defines so we use external fmt symbols
     end
 
     filter('system:android')

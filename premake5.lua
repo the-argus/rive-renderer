@@ -34,6 +34,14 @@ do
         'rive_sheenbidi',
     })
 
+    filter('options:with-kdgpu')
+    do
+        defines({ 'SPDLOG_FMT_EXTERNAL' })
+        cppdialect('C++20')
+        disablewarnings({ 'deprecated' })
+        links({ 'KDGpu', 'fmt' })
+    end
+
     filter('options:with-skia')
     do
         includedirs({
@@ -54,6 +62,23 @@ do
             RIVE_RUNTIME_DIR .. '/skia/dependencies/glfw_build/src/Release',
         })
         links({ 'glfw3', 'opengl32', 'd3d11', 'dxgi', 'd3dcompiler' })
+    end
+
+    filter('system:linux')
+    do
+        -- linux can use external libs, location defined by env vars
+        libdirs({
+            os.getenv("RIVE_BUILD_GLFW_LIBDIR"),
+            os.getenv("RIVE_BUILD_KDGPU_LIBDIR"),
+            os.getenv("RIVE_BUILD_FMT_LIBDIR"),
+            RIVE_RUNTIME_DIR .. '/skia/dependencies/glfw_build/src/Release',
+        })
+        includedirs({
+            os.getenv("RIVE_BUILD_GLFW_INCLUDE_PATH"),
+            os.getenv("RIVE_BUILD_KDGPU_INCLUDE_PATH"),
+            os.getenv("RIVE_BUILD_FMT_LIBDIR")
+        })
+        links({ 'glfw' })
     end
 
     filter('system:macosx')
