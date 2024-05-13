@@ -744,10 +744,11 @@ void PLSRenderTargetKDGpu::setTargetTextureView(
 }
 
 static std::vector<uint32_t> charBufferToCode(const uint32_t *buf,
-                                              size_t size) {
+                                              size_t sizeInBytes) {
   std::vector<uint32_t> code;
-  code.resize(size);
-  std::memcpy(code.data(), buf, size);
+  assert(sizeInBytes % sizeof(uint32_t) == 0);
+  code.resize(sizeInBytes / sizeof(uint32_t));
+  std::memcpy(code.data(), buf, sizeInBytes);
   return code;
 }
 
