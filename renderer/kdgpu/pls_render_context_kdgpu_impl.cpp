@@ -745,18 +745,18 @@ void PLSRenderTargetKDGpu::setTargetTextureView(
 
 static std::vector<uint32_t> charBufferToCode(const uint32_t *buf,
                                               size_t size) {
-  std::vector<uint32_t> fragmentCode;
-  fragmentCode.resize(size);
-  std::memcpy(fragmentCode.data(), buf, size);
-  return fragmentCode;
+  std::vector<uint32_t> code;
+  code.resize(size);
+  std::memcpy(code.data(), buf, size);
+  return code;
 }
 
 static std::vector<uint32_t> charBufferToCode(const char *buf, size_t size) {
-  std::vector<uint32_t> fragmentCode;
-  fragmentCode.resize(std::ceil(static_cast<float>(size) / sizeof(uint32_t)));
-  assert(fragmentCode.size() * sizeof(uint32_t) >= size);
-  std::memcpy(fragmentCode.data(), buf, size);
-  return fragmentCode;
+  std::vector<uint32_t> code;
+  code.resize(std::ceil(static_cast<float>(size) / sizeof(uint32_t)));
+  assert(code.size() * sizeof(uint32_t) >= size);
+  std::memcpy(code.data(), buf, size);
+  return code;
 }
 
 // Renders color ramps to the gradient texture.
