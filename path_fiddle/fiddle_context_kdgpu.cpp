@@ -126,7 +126,11 @@ FiddleContextKDGpu::FiddleContextKDGpu() {
       std::move(device), std::move(queue),
       PLSRenderContextKDGpuImpl::ContextOptions{}, PlatformFeatures{});
 
-  m_pixelCopyFence = device.createFence(FenceOptions{.createSignalled = true});
+  Device &contextOwnedDevice =
+      m_plsContext->static_impl_cast<PLSRenderContextKDGpuImpl>()->device();
+
+  m_pixelCopyFence =
+      contextOwnedDevice.createFence(FenceOptions{.createSignalled = true});
 }
 
 float FiddleContextKDGpu::dpiScale(GLFWwindow *) const {
