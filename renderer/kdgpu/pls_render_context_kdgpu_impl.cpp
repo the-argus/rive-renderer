@@ -250,10 +250,11 @@ PLSRenderContextKDGpuImpl::PLSRenderContextKDGpuImpl(
   m_patchIndexBuffer.unmap();
 
   m_nullImagePaintTexture = m_device.createTexture(TextureOptions{
+      .type = TextureType::TextureType2D,
       .format = Format::R8G8B8A8_UNORM,
       .extent = {.width = 1, .height = 1, .depth = 1},
-      .usage = TextureUsageFlags(TextureUsageFlagBits::SampledBit) |
-               TextureUsageFlags(TextureUsageFlagBits::TransferDstBit),
+      .mipLevels = 1, // vmaCreateImage just fails if miplevels is 0
+      .usage = TextureUsageFlagBits::SampledBit,
       .memoryUsage = MemoryUsage::GpuOnly,
   });
 
@@ -341,6 +342,7 @@ public:
       : PLSTexture(width, height) {
     using namespace KDGpu;
     m_texture = device.createTexture(TextureOptions{
+        .type = TextureType::TextureType2D,
         .format = Format::R8G8B8A8_UNORM,
         .extent = Extent3D{.width = width, .height = height, .depth = 1},
         .mipLevels = 1,
@@ -390,7 +392,7 @@ public:
       : BufferRing(std::max<size_t>(capacityInBytes, 1)), m_queue(queue) {
     for (auto &buf : m_buffers) {
       buf = device.createBuffer(KDGpu::BufferOptions{
-          .size = capacityInBytes,
+          .size = this->capacityInBytes(),
           .usage = usage | KDGpu::BufferUsageFlags(
                                // NOTE: wgpu::BufferUsage::CopyDst originally
                                KDGpu::BufferUsageFlagBits::TransferDstBit),
@@ -450,6 +452,7 @@ public:
 
     using namespace KDGpu;
     m_texture = device.createTexture(KDGpu::TextureOptions{
+        .type = TextureType::TextureType2D,
         .format = storage_texture_format(bufferStructure),
         .extent =
             {
@@ -457,6 +460,7 @@ public:
                 .height = textureHeight,
                 .depth = 1,
             },
+        .mipLevels = 1,
         .usage = KDGpu::TextureUsageFlags(TextureUsageFlagBits::SampledBit) |
                  KDGpu::TextureUsageFlagBits::TransferDstBit,
     });
@@ -545,10 +549,12 @@ void PLSRenderContextKDGpuImpl::resizeGradientTexture(uint32_t width,
 
   using namespace KDGpu;
   m_gradientTexture = m_device.createTexture(KDGpu::TextureOptions{
+      .type = TextureType::TextureType2D,
       .format = Format::R8G8B8A8_UNORM,
       .extent = {.width = static_cast<uint32_t>(width),
                  .height = static_cast<uint32_t>(height),
                  .depth = 1},
+      .mipLevels = 1,
       // NOTE: originally RenderAttachment and TextureBinding for wgpu
       .usage = TextureUsageFlags(TextureUsageFlagBits::ColorAttachmentBit) |
                TextureUsageFlagBits::SampledBit,
@@ -564,10 +570,12 @@ void PLSRenderContextKDGpuImpl::resizeTessellationTexture(uint32_t width,
 
   using namespace KDGpu;
   m_tesselationTexture = m_device.createTexture(KDGpu::TextureOptions{
+      .type = TextureType::TextureType2D,
       .format = Format::R32G32B32A32_UINT,
       .extent = {.width = static_cast<uint32_t>(width),
                  .height = static_cast<uint32_t>(height),
                  .depth = 1},
+      .mipLevels = 1,
       // NOTE: originally RenderAttachment and TextureBinding for wgpu
       .usage = TextureUsageFlags(TextureUsageFlagBits::ColorAttachmentBit) |
                TextureUsageFlagBits::SampledBit,
@@ -1140,10 +1148,12 @@ PLSRenderTargetKDGpu::PLSRenderTargetKDGpu(
     : PLSRenderTarget(width, height), m_framebufferFormat(framebufferFormat) {
   using namespace KDGpu;
   KDGpu::TextureOptions desc{
+      .type = TextureType::TextureType2D,
       .format = Format::R32_UINT,
       .extent = {.width = static_cast<uint32_t>(width),
                  .height = static_cast<uint32_t>(height),
                  .depth = 1},
+      .mipLevels = 1,
       .usage = TextureUsageFlags(TextureUsageFlagBits::ColorAttachmentBit) |
                additionalTextureFlags,
   };
