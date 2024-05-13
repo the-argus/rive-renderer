@@ -39,7 +39,7 @@ do
         defines({ 'SPDLOG_FMT_EXTERNAL' })
         cppdialect('C++20')
         disablewarnings({ 'deprecated' })
-        links({ 'KDGpu', 'fmt' })
+        links({ 'KDGpu', 'KDGui', 'fmt' })
     end
 
     filter('options:with-skia')
@@ -70,12 +70,14 @@ do
         libdirs({
             os.getenv("RIVE_BUILD_GLFW_LIBDIR"),
             os.getenv("RIVE_BUILD_KDGPU_LIBDIR"),
+            os.getenv("RIVE_BUILD_KDUTILS_LIBDIR"),
             os.getenv("RIVE_BUILD_FMT_LIBDIR"),
             RIVE_RUNTIME_DIR .. '/skia/dependencies/glfw_build/src/Release',
         })
         includedirs({
             os.getenv("RIVE_BUILD_GLFW_INCLUDE_PATH"),
             os.getenv("RIVE_BUILD_KDGPU_INCLUDE_PATH"),
+            os.getenv("RIVE_BUILD_KDUTILS_INCLUDE_PATH"),
             os.getenv("RIVE_BUILD_FMT_LIBDIR")
         })
         links({ 'glfw' })
