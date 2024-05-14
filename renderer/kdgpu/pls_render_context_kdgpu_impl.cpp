@@ -887,10 +887,9 @@ public:
     ShaderModule fragmentShader = device.createShaderModule(
         charBufferToCode(tessellate_frag, sizeof(tessellate_frag)));
 
-    PipelineLayout pipelineLayout =
-        device.createPipelineLayout(PipelineLayoutOptions{
-            .bindGroupLayouts = {m_bindGroupLayout},
-        });
+    m_pipelineLayout = device.createPipelineLayout(PipelineLayoutOptions{
+        .bindGroupLayouts = {m_bindGroupLayout},
+    });
 
     if (contextOptions.disableStorageBuffers) {
       // The built-in SPIRV does not #define DISABLE_SHADER_STORAGE_BUFFERS.
@@ -926,7 +925,7 @@ public:
                     .stage = ShaderStageFlagBits::FragmentBit,
                 },
             },
-        .layout = pipelineLayout,
+        .layout = m_pipelineLayout,
         .vertex =
             VertexOptions{
                 .buffers = {{
@@ -978,6 +977,7 @@ public:
 private:
   KDGpu::BindGroupLayout m_bindGroupLayout;
   KDGpu::GraphicsPipeline m_renderPipeline;
+  KDGpu::PipelineLayout m_pipelineLayout;
 };
 
 class PLSRenderContextKDGpuImpl::DrawPipeline {

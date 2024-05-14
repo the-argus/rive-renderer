@@ -144,6 +144,9 @@ private:
   KDGpu::GpuSemaphore m_imageAvailableSemaphore;
   KDGpu::GpuSemaphore m_renderCompleteSemaphore;
   KDGpu::Fence m_frameInFlightFence;
+
+  // per-frame resources
+  KDGpu::CommandBuffer m_commandBuffer;
 };
 
 } // namespace rive::pls
