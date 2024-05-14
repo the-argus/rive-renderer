@@ -1610,8 +1610,10 @@ void PLSRenderContextKDGpuImpl::flush(const FlushDescriptor &desc) {
   m_commandBuffer = commandRecorder.finish();
   m_queue.submit(SubmitOptions{
       .commandBuffers = {m_commandBuffer},
-      .waitSemaphores = {m_imageAvailableSemaphore},
-      .signalSemaphores = {m_renderCompleteSemaphore},
+      // wait for the target image to be available from swapchain acquisition
+      .waitSemaphores = {swapchainImageAcquisitionCompletedSemaphore()},
+      // signal that we are ready for presentation after submission
+      .signalSemaphores = {renderToSwapchainImageCompletedSemaphore()},
       .signalFence = m_frameInFlightFence,
   });
 }

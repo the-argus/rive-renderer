@@ -67,8 +67,14 @@ public:
 
   inline void wait() { m_frameInFlightFence.wait(); }
 
-  inline KDGpu::Handle<KDGpu::GpuSemaphore_t> waitSemaphore() {
+  inline KDGpu::Handle<KDGpu::GpuSemaphore_t>
+  swapchainImageAcquisitionCompletedSemaphore() {
     return m_imageAvailableSemaphore;
+  }
+
+  inline KDGpu::Handle<KDGpu::GpuSemaphore_t>
+  renderToSwapchainImageCompletedSemaphore() {
+    return m_renderCompleteSemaphore;
   }
 
 protected:

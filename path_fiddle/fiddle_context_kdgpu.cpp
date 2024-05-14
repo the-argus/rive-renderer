@@ -162,10 +162,12 @@ void FiddleContextKDGpu::begin(
   using namespace KDGpu;
   // find the texture view we can set as the render target for this frame
   m_currentImageIndex = 0;
+  // signal the render context's corresponding semaphore when swapchain image
+  // acquisition is complete
   AcquireImageResult result = m_swapchain.getNextImageIndex(
       m_currentImageIndex,
       m_plsContext->static_impl_cast<PLSRenderContextKDGpuImpl>()
-          ->waitSemaphore());
+          ->swapchainImageAcquisitionCompletedSemaphore());
 
   if (result == AcquireImageResult::OutOfDate) {
     // This can happen when swapchain was resized
@@ -260,7 +262,8 @@ void FiddleContextKDGpu::end(GLFWwindow *window,
       m_plsContext->static_impl_cast<PLSRenderContextKDGpuImpl>();
 
   device().queues()[0].present(KDGpu::PresentOptions{
-      .waitSemaphores = {context->waitSemaphore()},
+      // queue.submit() signals this semaphore when complete
+      .waitSemaphores = {context->renderToSwapchainImageCompletedSemaphore()},
       .swapchainInfos = {{
           .swapchain = m_swapchain,
           .imageIndex = m_currentImageIndex,
