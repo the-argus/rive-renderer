@@ -86,6 +86,9 @@ public:
   float dpiScale(GLFWwindow *) const override;
 
 private:
+  static constexpr KDGpu::Format swapchainFormat =
+      KDGpu::Format::R8G8B8A8_UNORM;
+
   KDGpu::Device &device() {
     return m_plsContext->static_impl_cast<PLSRenderContextKDGpuImpl>()
         ->device();
@@ -287,9 +290,8 @@ void FiddleContextKDGpu::onSizeChanged(GLFWwindow *window, int width,
 
   createSwapchain(width, height);
 
-  m_renderTarget =
-      m_plsContext->static_impl_cast<PLSRenderContextKDGpuImpl>()
-          ->makeRenderTarget(Format::R8G8B8A8_UNORM, width, height);
+  m_renderTarget = m_plsContext->static_impl_cast<PLSRenderContextKDGpuImpl>()
+                       ->makeRenderTarget(swapchainFormat, width, height);
 }
 
 void FiddleContextKDGpu::createSwapchain(int width, int height) {
@@ -315,6 +317,7 @@ void FiddleContextKDGpu::createSwapchain(int width, int height) {
 
   const SwapchainOptions swapchainOptions{
       .surface = *m_surface,
+      .format = swapchainFormat,
       .minImageCount = getSuitableImageCount(swapchainProperties.capabilities),
       .imageExtent =
           {

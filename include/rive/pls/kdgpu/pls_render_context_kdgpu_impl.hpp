@@ -77,9 +77,11 @@ protected:
       const pls::PlatformFeatures &baselinePlatformFeatures);
 
   // Create a standard PLS "draw" pipeline for the current implementation.
-  virtual KDGpu::GraphicsPipeline makePLSDrawPipeline(
-      rive::pls::DrawType drawType, KDGpu::Format framebufferFormat,
-      const KDGpu::ShaderModule& vertexShader, const KDGpu::ShaderModule& fragmentShader);
+  virtual KDGpu::GraphicsPipeline
+  makePLSDrawPipeline(rive::pls::DrawType drawType,
+                      KDGpu::Format framebufferFormat,
+                      const KDGpu::ShaderModule &vertexShader,
+                      const KDGpu::ShaderModule &fragmentShader);
 
   // Create a standard PLS "draw" render pass for the current implementation.
   virtual KDGpu::RenderPassCommandRecorder
@@ -147,6 +149,9 @@ private:
 
   // per-frame resources
   KDGpu::CommandBuffer m_commandBuffer;
+
+  // caching resources (used per-frame)
+  std::vector<KDGpu::BindGroup> m_frameBindings;
 };
 
 } // namespace rive::pls

@@ -1430,9 +1430,9 @@ void PLSRenderContextKDGpuImpl::flush(const FlushDescriptor &desc) {
   });
 
   const TextureView *currentImageTextureView = &m_nullImagePaintTextureView;
-  // bindings for the draw pass which must live after everything else
-  BindGroup bindings;
   bool needsNewBindings = true;
+  // destroy bindings generated on previous  frame
+  m_frameBindings.clear();
 
   for (const DrawBatch &batch : *desc.drawList) {
     if (batch.elementCount == 0) {
@@ -1463,7 +1463,7 @@ void PLSRenderContextKDGpuImpl::flush(const FlushDescriptor &desc) {
     }
 
     if (needsNewBindings) {
-      bindings = m_device.createBindGroup(BindGroupOptions{
+      m_frameBindings.push_back(m_device.createBindGroup(BindGroupOptions{
                .layout = m_drawBindGroupLayouts[0],
                .resources = {
                 BindGroupEntry{
@@ -1541,11 +1541,12 @@ void PLSRenderContextKDGpuImpl::flush(const FlushDescriptor &desc) {
                         .size = sizeof(pls::ImageDrawUniforms),
                     },
                 },
-        }});
+        }}));
 
       if (needsNewBindings || drawType == DrawType::imageRect ||
           drawType == DrawType::imageMesh) {
-        drawPass.setBindGroup(0, bindings, {}, {batch.imageDrawDataOffset});
+        drawPass.setBindGroup(0, m_frameBindings.back(), {},
+                              {batch.imageDrawDataOffset});
         needsNewBindings = false;
       }
 
