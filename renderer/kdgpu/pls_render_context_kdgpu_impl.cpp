@@ -1087,32 +1087,32 @@ public:
       fragmentGLSL << "#pragma shader_stage(fragment)\n";
       fragmentGLSL << "#define " GLSL_FRAGMENT "\n";
       fragmentGLSL << glsl.str();
-      vertexShader = context.device().createShaderModule(charBufferToCode(
+      fragmentShader = context.device().createShaderModule(charBufferToCode(
           fragmentGLSL.str().c_str(), fragmentGLSL.str().size()));
     } else {
       switch (drawType) {
       case DrawType::midpointFanPatches:
       case DrawType::outerCurvePatches:
         vertexShader = context.device().createShaderModule(
-            charBufferToCode(draw_path_vert, std::size(draw_path_vert)));
+            charBufferToCode(draw_path_vert, sizeof(draw_path_vert)));
         fragmentShader = context.device().createShaderModule(
-            charBufferToCode(draw_path_frag, std::size(draw_path_frag)));
+            charBufferToCode(draw_path_frag, sizeof(draw_path_frag)));
         break;
       case DrawType::interiorTriangulation:
         vertexShader = context.device().createShaderModule(
             charBufferToCode(draw_interior_triangles_vert,
-                             std::size(draw_interior_triangles_vert)));
+                             sizeof(draw_interior_triangles_vert)));
         fragmentShader = context.device().createShaderModule(
             charBufferToCode(draw_interior_triangles_frag,
-                             std::size(draw_interior_triangles_frag)));
+                             sizeof(draw_interior_triangles_frag)));
         break;
       case DrawType::imageRect:
         RIVE_UNREACHABLE();
       case DrawType::imageMesh:
         vertexShader = context.device().createShaderModule(charBufferToCode(
-            draw_image_mesh_vert, std::size(draw_image_mesh_vert)));
+            draw_image_mesh_vert, sizeof(draw_image_mesh_vert)));
         fragmentShader = context.device().createShaderModule(charBufferToCode(
-            draw_image_mesh_frag, std::size(draw_image_mesh_frag)));
+            draw_image_mesh_frag, sizeof(draw_image_mesh_frag)));
         break;
       case DrawType::plsAtomicInitialize:
       case DrawType::plsAtomicResolve:
