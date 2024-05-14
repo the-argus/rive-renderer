@@ -7,9 +7,12 @@
 #include <KDGpu/bind_group_options.h>
 #include <KDGpu/buffer.h>
 #include <KDGpu/buffer_options.h>
+#include <KDGpu/graphics_api.h>
 #include <KDGpu/graphics_pipeline_options.h>
 #include <KDGpu/sampler.h>
 #include <KDGpu/texture_options.h>
+#include <KDGpu/vulkan/vulkan_render_pass_command_recorder.h>
+#include <KDGpu/vulkan/vulkan_resource_manager.h>
 
 #include "shaders/constants.glsl"
 
@@ -785,10 +788,9 @@ public:
                 },
             }});
 
-    KDGpu::PipelineLayout pipelineLayout =
-        device.createPipelineLayout(PipelineLayoutOptions{
-            .bindGroupLayouts = {m_bindGroupLayout},
-        });
+    m_pipelineLayout = device.createPipelineLayout(PipelineLayoutOptions{
+        .bindGroupLayouts = {m_bindGroupLayout},
+    });
 
     KDGpu::ShaderModule vertexShader = device.createShaderModule(
         charBufferToCode(color_ramp_vert, sizeof(color_ramp_vert)));
@@ -808,7 +810,7 @@ public:
                     .stage = ShaderStageFlagBits::FragmentBit,
                 },
             },
-        .layout = pipelineLayout,
+        .layout = m_pipelineLayout,
         .vertex =
             VertexOptions{
                 .buffers = {{
@@ -847,6 +849,7 @@ private:
   // EmJsHandle m_vertexShaderHandle;
   // EmJsHandle m_fragmentShaderHandle;
   KDGpu::GraphicsPipeline m_renderPipeline;
+  KDGpu::PipelineLayout m_pipelineLayout;
 };
 
 class PLSRenderContextKDGpuImpl::TessellatePipeline {
@@ -1425,8 +1428,6 @@ void PLSRenderContextKDGpuImpl::flush(const FlushDescriptor &desc) {
       .height = static_cast<float>(renderTarget->height()),
   });
 
-  drawPass.setBindGroup(SAMPLER_BINDINGS_SET, m_samplerBindings);
-
   const TextureView *currentImageTextureView = &m_nullImagePaintTextureView;
   // bindings for the draw pass which must live after everything else
   BindGroup bindings;
@@ -1438,6 +1439,20 @@ void PLSRenderContextKDGpuImpl::flush(const FlushDescriptor &desc) {
     }
 
     DrawType drawType = batch.drawType;
+
+    const DrawPipeline &drawPipeline =
+        m_drawPipelines
+            .try_emplace(
+                pls::ShaderUniqueKey(drawType, batch.shaderFeatures,
+                                     pls::InterlockMode::rasterOrdering,
+                                     pls::ShaderMiscFlags::none),
+                *this, drawType, batch.shaderFeatures, m_contextOptions)
+            .first->second;
+    drawPass.setPipeline(
+        drawPipeline.renderPipeline(renderTarget->framebufferFormat()));
+
+    // set sampler bindings per-batch
+    drawPass.setBindGroup(SAMPLER_BINDINGS_SET, m_samplerBindings);
 
     // Bind the appropriate image texture, if any.
     if (auto *imageTexture =
@@ -1531,17 +1546,6 @@ void PLSRenderContextKDGpuImpl::flush(const FlushDescriptor &desc) {
         drawPass.setBindGroup(0, bindings, {}, {batch.imageDrawDataOffset});
         needsNewBindings = false;
       }
-
-      const DrawPipeline &drawPipeline =
-          m_drawPipelines
-              .try_emplace(
-                  pls::ShaderUniqueKey(drawType, batch.shaderFeatures,
-                                       pls::InterlockMode::rasterOrdering,
-                                       pls::ShaderMiscFlags::none),
-                  *this, drawType, batch.shaderFeatures, m_contextOptions)
-              .first->second;
-      drawPass.setPipeline(
-          drawPipeline.renderPipeline(renderTarget->framebufferFormat()));
 
       switch (drawType) {
       case DrawType::midpointFanPatches:
