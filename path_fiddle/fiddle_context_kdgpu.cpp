@@ -1,6 +1,5 @@
 #include "fiddle_context.hpp"
 
-#include "path_fiddle.hpp"
 #include "rive/pls/kdgpu/pls_render_context_kdgpu_impl.hpp"
 #include "rive/pls/pls_renderer.hpp"
 
@@ -9,19 +8,32 @@
 #include <KDGpu/instance.h>
 #include <KDGpu/swapchain_options.h>
 #include <KDGpu/vulkan/vulkan_graphics_api.h>
+#include <KDGui/config.h>
 
 #define GLFW_INCLUDE_NONE
+
 #if defined(KDGUI_PLATFORM_WIN32)
 #define GLFW_EXPOSE_NATIVE_WIN32
-#elif defined(KDGUI_PLATFORM_XCB)
+#endif
+
+#if defined(KDGUI_PLATFORM_XCB)
 // TODO: see how to give kdgui xcb resources from x11 resources, if possible
-#define GLFW_EXPOSE_NATIVE_X11
-#elif defined(KDGUI_PLATFORM_WAYLAND)
+// NOTE: doing GLFW_EXPOSE_NATIVE_X11 includes xlib headers, which define a
+// macro "Success" which conflicts with AcquireImageResult::Success from KDGpu
+//
+// #define GLFW_EXPOSE_NATIVE_X11
+#endif
+
+#if defined(KDGUI_PLATFORM_WAYLAND)
 #define GLFW_EXPOSE_NATIVE_WAYLAND
-#elif defined(KDGUI_PLATFORM_COCOA)
+#endif
+
+#if defined(KDGUI_PLATFORM_COCOA)
 #define GLFW_EXPOSE_NATIVE_COCOA
 #endif
-#include "GLFW/glfw3.h"
+
+#include <GLFW/glfw3.h>
+#include <GLFW/glfw3native.h>
 
 using namespace rive;
 using namespace rive::pls;
@@ -31,13 +43,18 @@ KDGpu::SurfaceOptions getSurfaceOptionsFrom(GLFWwindow *window) {
   SurfaceOptions surfaceOptions{};
 #if defined(KDGUI_PLATFORM_WIN32)
   surfaceOptions.hWnd = glfwGetWin32Window(window);
-#endif
-#if defined(KDGUI_PLATFORM_XCB)
-  RIVE_UNREACHABLE();
+  return surfaceOptions;
 #endif
 #if defined(KDGUI_PLATFORM_WAYLAND)
   surfaceOptions.display = glfwGetWaylandDisplay();
   surfaceOptions.surface = glfwGetWaylandWindow(window);
+  return surfaceOptions;
+#endif
+#if defined(KDGUI_PLATFORM_XCB)
+  // NOTE: both XCB and wayland can be supported simultaneously. later, we
+  // should default to xcb i think since it can also be used via xwayland. but
+  // right now it doesnt work so it's not default
+  RIVE_UNREACHABLE();
 #endif
 #if defined(KDGUI_PLATFORM_COCOA)
   // TODO: macos
@@ -99,16 +116,11 @@ private:
 
 FiddleContextKDGpu::FiddleContextKDGpu() {
   using namespace KDGpu;
-  auto vkapi = std::make_unique<VulkanGraphicsApi>();
-  // NOTE: no clue why this needs to be reinterpret cast?
-  // it should be an implicit conversion
-  // maybe its just my language server?
-  static_assert(std::is_base_of_v<GraphicsApi, VulkanGraphicsApi>);
-  m_api = std::unique_ptr<GraphicsApi>(
-      reinterpret_cast<GraphicsApi *>(vkapi.get()));
+  m_api = std::make_unique<VulkanGraphicsApi>();
 
   m_instance = m_api->createInstance(InstanceOptions{
       .applicationName = "path_fiddle",
+      .applicationVersion = KDGPU_MAKE_API_VERSION(0, 1, 0, 0),
   });
 
   m_adapter = m_instance.selectAdapter(AdapterDeviceType::Default);
@@ -335,8 +347,5 @@ rive::pls::PLSRenderContext *FiddleContextKDGpu::plsContextOrNull() {
 }
 
 std::unique_ptr<FiddleContext> FiddleContext::MakeKDGpu() {
-  static_assert(std::is_base_of_v<FiddleContext, FiddleContextKDGpu>);
-  // TODO: why cant we static cast here, or implicit cast the unique ptr?
-  return std::unique_ptr<FiddleContext>(
-      reinterpret_cast<FiddleContext *>(new FiddleContextKDGpu()));
+  return std::make_unique<FiddleContextKDGpu>();
 }
