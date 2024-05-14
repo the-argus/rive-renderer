@@ -635,7 +635,8 @@ KDGpu::RenderPassCommandRecorder PLSRenderContextKDGpuImpl::makePLSRenderPass(
 
 KDGpu::GraphicsPipeline PLSRenderContextKDGpuImpl::makePLSDrawPipeline(
     rive::pls::DrawType drawType, KDGpu::Format framebufferFormat,
-    KDGpu::ShaderModule vertexShader, KDGpu::ShaderModule fragmentShader) {
+    const KDGpu::ShaderModule &vertexShader,
+    const KDGpu::ShaderModule &fragmentShader) {
   using namespace KDGpu;
   std::vector<VertexAttribute> attrs;
   std::vector<VertexBufferLayout> vertexBufferLayouts;

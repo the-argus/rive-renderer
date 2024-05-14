@@ -79,7 +79,7 @@ protected:
   // Create a standard PLS "draw" pipeline for the current implementation.
   virtual KDGpu::GraphicsPipeline makePLSDrawPipeline(
       rive::pls::DrawType drawType, KDGpu::Format framebufferFormat,
-      KDGpu::ShaderModule vertexShader, KDGpu::ShaderModule fragmentShader);
+      const KDGpu::ShaderModule& vertexShader, const KDGpu::ShaderModule& fragmentShader);
 
   // Create a standard PLS "draw" render pass for the current implementation.
   virtual KDGpu::RenderPassCommandRecorder
