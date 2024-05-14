@@ -1217,6 +1217,9 @@ void PLSRenderContextKDGpuImpl::flush(const FlushDescriptor &desc) {
           commandRecorder);
     }
   }
+  // bindgroup for gradient pass which must live after the if statement
+  // enclosing the gradpass
+  BindGroup gradientBindings;
 
   // Render the complex color ramps to the gradient texture.
   if (desc.complexGradSpanCount > 0) {
@@ -1226,7 +1229,7 @@ void PLSRenderContextKDGpuImpl::flush(const FlushDescriptor &desc) {
     const auto &gradSpanBuffers =
         *static_cast<const BufferKDGpu *>(gradSpanBufferRing());
 
-    BindGroup bindings = m_device.createBindGroup(BindGroupOptions{
+    gradientBindings = m_device.createBindGroup(BindGroupOptions{
         .layout = m_colorRampPipeline->bindGroupLayout(),
         .resources =
             {
@@ -1260,7 +1263,7 @@ void PLSRenderContextKDGpuImpl::flush(const FlushDescriptor &desc) {
 
     gradPass.setPipeline(m_colorRampPipeline->renderPipeline());
     gradPass.setVertexBuffer(0, gradSpanBuffers.submittedBuffer());
-    gradPass.setBindGroup(0, bindings);
+    gradPass.setBindGroup(0, gradientBindings);
     gradPass.draw(DrawCommand{
         .vertexCount = 4,
         .instanceCount = static_cast<uint32_t>(desc.complexGradSpanCount),
@@ -1289,6 +1292,10 @@ void PLSRenderContextKDGpuImpl::flush(const FlushDescriptor &desc) {
                     }},
         }});
   }
+
+  // bindgroup used for tesselation which must live past the enclosing if
+  // statement
+  KDGpu::BindGroup tesselationBindings;
 
   // Tessellate all curves into vertices in the tessellation texture.
   if (desc.tessVertexSpanCount > 0) {
@@ -1336,7 +1343,7 @@ void PLSRenderContextKDGpuImpl::flush(const FlushDescriptor &desc) {
       }
     };
 
-    KDGpu::BindGroup bindings = m_device.createBindGroup(BindGroupOptions{
+    tesselationBindings = m_device.createBindGroup(BindGroupOptions{
         .layout = m_tessellatePipeline->bindGroupLayout(),
         .resources =
             {
@@ -1386,7 +1393,7 @@ void PLSRenderContextKDGpuImpl::flush(const FlushDescriptor &desc) {
         0, static_cast<const BufferKDGpu *>(tessSpanBufferRing())
                ->submittedBuffer());
     tessPass.setIndexBuffer(m_tessSpanIndexBuffer, 0, IndexType::Uint16);
-    tessPass.setBindGroup(0, bindings);
+    tessPass.setBindGroup(0, tesselationBindings);
     tessPass.drawIndexed(DrawIndexedCommand{
         .indexCount = std::size(pls::kTessSpanIndices),
         .instanceCount = static_cast<uint32_t>(desc.tessVertexSpanCount),
@@ -1421,6 +1428,7 @@ void PLSRenderContextKDGpuImpl::flush(const FlushDescriptor &desc) {
   drawPass.setBindGroup(SAMPLER_BINDINGS_SET, m_samplerBindings);
 
   const TextureView *currentImageTextureView = &m_nullImagePaintTextureView;
+  // bindings for the draw pass which must live after everything else
   BindGroup bindings;
   bool needsNewBindings = true;
 
@@ -1592,8 +1600,9 @@ void PLSRenderContextKDGpuImpl::flush(const FlushDescriptor &desc) {
 
   drawPass.end();
   m_frameInFlightFence.reset();
+  m_commandBuffer = commandRecorder.finish();
   m_queue.submit(SubmitOptions{
-      .commandBuffers = {commandRecorder.finish()},
+      .commandBuffers = {m_commandBuffer},
       .waitSemaphores = {m_imageAvailableSemaphore},
       .signalSemaphores = {m_renderCompleteSemaphore},
       .signalFence = m_frameInFlightFence,
