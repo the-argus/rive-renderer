@@ -144,7 +144,7 @@ PLSRenderContextKDGpuImpl::PLSRenderContextKDGpuImpl(
                   {
                       .binding = IMAGE_DRAW_UNIFORM_BUFFER_IDX,
                       .count = 1,
-                      .resourceType = ResourceBindingType::UniformBuffer,
+                      .resourceType = ResourceBindingType::DynamicUniformBuffer,
                       .shaderStages =
                           ShaderStageFlags(ShaderStageFlagBits::VertexBit) |
                           ShaderStageFlags(ShaderStageFlagBits::FragmentBit),
@@ -1535,7 +1535,8 @@ void PLSRenderContextKDGpuImpl::flush(const FlushDescriptor &desc) {
                 },
                 {
                     .binding = IMAGE_DRAW_UNIFORM_BUFFER_IDX,
-                    .resource = UniformBufferBinding{
+                    // dynamic, determined by imageDrawDataOffset
+                    .resource = DynamicUniformBufferBinding{
                         .buffer = static_cast<const BufferKDGpu*>(imageDrawUniformBufferRing())->submittedBuffer(),
                         .size = sizeof(pls::ImageDrawUniforms),
                     },
