@@ -788,15 +788,17 @@ charBufferToCode(const char *buf, size_t size,
       buf, size, shaderc_shader_kind::shaderc_glsl_infer_from_source,
       identifier);
 
-  printf("ENCOUNTERED %zu ERRORS AND %zu WARNINGS WHILE COMPILING SHADER [ "
-         "%s ]\n",
-         compiledShader.GetNumErrors(), compiledShader.GetNumWarnings(),
-         identifier);
+  SPDLOG_LOGGER_INFO(
+      KDGpu::Logger::logger(),
+      "ENCOUNTERED {} ERRORS AND {} WARNINGS WHILE COMPILING SHADER [ {} ]",
+      compiledShader.GetNumErrors(), compiledShader.GetNumWarnings(),
+      identifier);
 
   if (compiledShader.GetCompilationStatus() !=
       shaderc_compilation_status::shaderc_compilation_status_success) {
-    fprintf(stderr, "SHADER COMPILATION FAILED: %s\n",
-            compiledShader.GetErrorMessage().c_str());
+    SPDLOG_LOGGER_ERROR(KDGpu::Logger::logger(),
+                        "SHADER COMPILATION FAILED: {}",
+                        compiledShader.GetErrorMessage().c_str());
     return {};
   }
   return {compiledShader.cbegin(), compiledShader.cend()};
