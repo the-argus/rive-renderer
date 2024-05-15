@@ -254,6 +254,7 @@ PLSRenderContextKDGpuImpl::PLSRenderContextKDGpuImpl(
   m_patchIndexBuffer.unmap();
 
   m_nullImagePaintTexture = m_device.createTexture(TextureOptions{
+      .label = "nullImagePaintTexture",
       .type = TextureType::TextureType2D,
       .format = Format::R8G8B8A8_UNORM,
       .extent = {.width = 1, .height = 1, .depth = 1},
@@ -346,6 +347,7 @@ public:
       : PLSTexture(width, height) {
     using namespace KDGpu;
     m_texture = device.createTexture(TextureOptions{
+        .label = "UNKNOWN_TEXTURE",
         .type = TextureType::TextureType2D,
         .format = Format::R8G8B8A8_UNORM,
         .extent = Extent3D{.width = width, .height = height, .depth = 1},
@@ -456,6 +458,7 @@ public:
 
     using namespace KDGpu;
     m_texture = device.createTexture(KDGpu::TextureOptions{
+        .label = "UNKNOWN_STORAGE_TEXTURE_BUFFER",
         .type = TextureType::TextureType2D,
         .format = storage_texture_format(bufferStructure),
         .extent =
@@ -557,6 +560,7 @@ void PLSRenderContextKDGpuImpl::resizeGradientTexture(uint32_t width,
 
   using namespace KDGpu;
   m_gradientTexture = m_device.createTexture(KDGpu::TextureOptions{
+      .label = "gradientTexture",
       .type = TextureType::TextureType2D,
       .format = Format::R8G8B8A8_UNORM,
       .extent = {.width = static_cast<uint32_t>(width),
@@ -579,6 +583,7 @@ void PLSRenderContextKDGpuImpl::resizeTessellationTexture(uint32_t width,
 
   using namespace KDGpu;
   m_tesselationTexture = m_device.createTexture(KDGpu::TextureOptions{
+      .label = "tesselationTexture",
       .type = TextureType::TextureType2D,
       .format = Format::R32G32B32A32_UINT,
       .extent = {.width = static_cast<uint32_t>(width),
@@ -1195,10 +1200,13 @@ PLSRenderTargetKDGpu::PLSRenderTargetKDGpu(
                additionalTextureFlags,
   };
 
+  desc.label = "coverageTexture";
   m_coverageTexture = device.createTexture(desc);
+  desc.label = "clipTexture";
   m_clipTexture = device.createTexture(desc);
 
   desc.format = m_framebufferFormat;
+  desc.label = "originalDstColorTexture";
   m_originalDstColorTexture = device.createTexture(desc);
 
   m_targetTextureView = {};
