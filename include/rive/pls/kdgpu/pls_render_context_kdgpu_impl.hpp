@@ -148,6 +148,12 @@ private:
   KDGpu::Texture m_nullImagePaintTexture;
   KDGpu::TextureView m_nullImagePaintTextureView;
 
+  // state tracking for images
+  KDGpu::TextureLayout m_nullImagePaintTextureLayout =
+      KDGpu::TextureLayout::Undefined;
+  KDGpu::TextureLayout m_gradientTextureLayout =
+      KDGpu::TextureLayout::Undefined;
+
   // sync primitives
   KDGpu::GpuSemaphore m_imageAvailableSemaphore;
   KDGpu::GpuSemaphore m_renderCompleteSemaphore;

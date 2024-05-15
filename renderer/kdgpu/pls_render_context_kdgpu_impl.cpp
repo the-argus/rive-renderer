@@ -1292,6 +1292,7 @@ void PLSRenderContextKDGpuImpl::flush(const FlushDescriptor &desc) {
                 .clearValue = ColorClearValue{},
                 .finalLayout = TextureLayout::TransferDstOptimal,
             }}});
+    m_gradientTextureLayout = TextureLayout::TransferDstOptimal;
 
     gradPass.setViewport(Viewport{
         .x = 0.f,
@@ -1451,6 +1452,32 @@ void PLSRenderContextKDGpuImpl::flush(const FlushDescriptor &desc) {
   } else {
     loadOp = AttachmentLoadOperation::Load;
   }
+
+  auto checkLayoutIsReadyForDrawpass =
+      [&commandRecorder](KDGpu::TextureLayout &textureLayout,
+                         KDGpu::Texture &texture) -> void {
+    if (textureLayout != TextureLayout::ShaderReadOnlyOptimal) {
+      commandRecorder.textureMemoryBarrier(TextureMemoryBarrierOptions{
+          .srcStages = PipelineStageFlags(PipelineStageFlagBit::AllGraphicsBit),
+          .srcMask = AccessFlagBit::TransferWriteBit,
+          .dstStages =
+              PipelineStageFlags(PipelineStageFlagBit::FragmentShaderBit),
+          .dstMask = AccessFlags(AccessFlagBit::ShaderReadBit),
+          .oldLayout = textureLayout,
+          .newLayout = TextureLayout::ShaderReadOnlyOptimal,
+          .texture = texture,
+          .range =
+              {
+                  .aspectMask = TextureAspectFlagBits::ColorBit,
+                  .levelCount = 1,
+              },
+      });
+      textureLayout = TextureLayout::ShaderReadOnlyOptimal;
+    }
+  };
+  checkLayoutIsReadyForDrawpass(m_nullImagePaintTextureLayout,
+                                m_nullImagePaintTexture);
+  checkLayoutIsReadyForDrawpass(m_gradientTextureLayout, m_gradientTexture);
 
   RenderPassCommandRecorder drawPass =
       makePLSRenderPass(commandRecorder, *renderTarget, loadOp, clearColor);
