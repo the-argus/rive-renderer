@@ -481,6 +481,23 @@ public:
     auto [updateWidth, updateHeight] =
         pls::StorageTextureSize(bindingSizeInBytes, m_bufferStructure);
 
+    // before transfer phase, we need to be in TransferDstOptimal layout
+    commandRecorder.textureMemoryBarrier(TextureMemoryBarrierOptions{
+        .srcStages = PipelineStageFlagBit::TopOfPipeBit,
+        .srcMask = AccessFlagBit::None,
+        .dstStages = PipelineStageFlagBit::TransferBit,
+        .dstMask = AccessFlagBit::TransferWriteBit,
+        .oldLayout = m_textureLayout,
+        .newLayout = TextureLayout::TransferDstOptimal,
+        .texture = m_texture,
+        .range =
+            {
+                .aspectMask = TextureAspectFlagBits::ColorBit,
+                .levelCount = 1,
+            },
+    });
+
+    // perform transfer
     commandRecorder.copyBufferToTexture(BufferToTextureCopy{
         .srcBuffer = submittedBuffer(),
         .dstTexture = m_texture,
@@ -505,6 +522,24 @@ public:
                 },
             },
     });
+
+    // after transfer phase, before fragment shader, we need to be in shader
+    // read only optimal so we can be sampled from
+    commandRecorder.textureMemoryBarrier(TextureMemoryBarrierOptions{
+        .srcStages = PipelineStageFlagBit::TransferBit,
+        .srcMask = AccessFlagBit::TransferWriteBit,
+        .dstStages = PipelineStageFlagBit::FragmentShaderBit,
+        .dstMask = AccessFlagBit::ShaderReadBit,
+        .oldLayout = TextureLayout::TransferDstOptimal,
+        .newLayout = TextureLayout::ShaderReadOnlyOptimal,
+        .texture = m_texture,
+        .range =
+            {
+                .aspectMask = TextureAspectFlagBits::ColorBit,
+                .levelCount = 1,
+            },
+    });
+    m_textureLayout = TextureLayout::ShaderReadOnlyOptimal;
   }
 
   const KDGpu::TextureView &textureView() const { return m_textureView; }
@@ -513,6 +548,8 @@ private:
   const StorageBufferStructure m_bufferStructure;
   KDGpu::Texture m_texture;
   KDGpu::TextureView m_textureView;
+  mutable KDGpu::TextureLayout m_textureLayout =
+      KDGpu::TextureLayout::Undefined;
 };
 
 std::unique_ptr<BufferRing>
