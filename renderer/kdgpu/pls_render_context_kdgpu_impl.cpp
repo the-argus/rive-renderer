@@ -1037,10 +1037,8 @@ public:
       glsl << "#extension GL_EXT_samplerless_texture_functions : enable\n";
       addDefine(GLSL_TARGET_VULKAN);
       addDefine(GLSL_PLS_IMPL_NONE);
+      addDefine(GLSL_DISABLE_SHADER_STORAGE_BUFFERS);
 
-      if (contextOptions.disableStorageBuffers) {
-        addDefine(GLSL_DISABLE_SHADER_STORAGE_BUFFERS);
-      }
       switch (drawType) {
       case DrawType::midpointFanPatches:
       case DrawType::outerCurvePatches:
@@ -1215,11 +1213,6 @@ PLSRenderContextKDGpuImpl::makeRenderTarget(KDGpu::Format framebufferFormat,
   return rcp(new PLSRenderTargetKDGpu(
       m_device, framebufferFormat, width, height,
       KDGpu::TextureUsageFlagBits::InputAttachmentBit));
-}
-
-static const KDGpu::Buffer &vulkan_buffer(const BufferRing *bufferRing) {
-  assert(bufferRing != nullptr);
-  return static_cast<const BufferKDGpu *>(bufferRing)->submittedBuffer();
 }
 
 template <typename HighLevelStruct>
