@@ -22,11 +22,12 @@ constexpr size_t kDefaultDrawCapacity = 2048;
 
 constexpr size_t kMaxTextureHeight = 2048; // TODO: Move this variable to PlatformFeatures.
 constexpr size_t kMaxTessellationVertexCount = kMaxTextureHeight * kTessTextureWidth;
+constexpr size_t kMaxTessellationPaddingVertexCount =
+    pls::kMidpointFanPatchSegmentSpan +      // Padding at the beginning of the tess texture
+    (pls::kOuterCurvePatchSegmentSpan - 1) + // Max padding between patch types in the tess texture
+    1;                                       // Padding at the end of the tessellation texture
 constexpr size_t kMaxTessellationVertexCountBeforePadding =
-    kMaxTessellationVertexCount -
-    pls::kMidpointFanPatchSegmentSpan -       // Padding at the beginning of the tess texture
-    (pls::kMidpointFanPatchSegmentSpan - 1) - // Max padding between patch types in the tess texture
-    1;                                        // Padding at the end of the tessellation texture
+    kMaxTessellationVertexCount - kMaxTessellationPaddingVertexCount;
 
 // We can only reorder 32767 draws at a time since the one-based groupIndex returned by
 // IntersectionBoard is a signed 16-bit integer.
@@ -598,21 +599,24 @@ void PLSRenderContext::LogicalFlush::layoutResources(const FlushResources& flush
     {
         // midpointFan tessellation vertices reside at the beginning of the tessellation texture,
         // after 1 patch of padding vertices.
-        constexpr uint32_t padding = pls::kMidpointFanPatchSegmentSpan;
-        m_midpointFanTessVertexIdx = padding;
+        constexpr uint32_t kPrePadding = pls::kMidpointFanPatchSegmentSpan;
+        m_midpointFanTessVertexIdx = kPrePadding;
         m_midpointFanTessEndLocation =
             m_midpointFanTessVertexIdx + m_resourceCounts.midpointFanTessVertexCount;
 
         // outerCubic tessellation vertices reside after the midpointFan vertices, aligned on a
         // multiple of the outerCubic patch size.
-        m_outerCubicTessVertexIdx =
-            m_midpointFanTessEndLocation +
+        uint32_t interiorPadding =
             PaddingToAlignUp<pls::kOuterCurvePatchSegmentSpan>(m_midpointFanTessEndLocation);
+        m_outerCubicTessVertexIdx = m_midpointFanTessEndLocation + interiorPadding;
         m_outerCubicTessEndLocation =
             m_outerCubicTessVertexIdx + m_resourceCounts.outerCubicTessVertexCount;
 
         // We need one more padding vertex after all the tessellation vertices.
-        totalTessVertexCountWithPadding = m_outerCubicTessEndLocation + 1;
+        constexpr uint32_t kPostPadding = 1;
+        totalTessVertexCountWithPadding = m_outerCubicTessEndLocation + kPostPadding;
+
+        assert(kPrePadding + interiorPadding + kPostPadding <= kMaxTessellationPaddingVertexCount);
         assert(totalTessVertexCountWithPadding <= kMaxTessellationVertexCount);
     }
 
@@ -748,6 +752,9 @@ void PLSRenderContext::LogicalFlush::writeResources()
 {
     const pls::PlatformFeatures& platformFeatures = m_ctx->platformFeatures();
     assert(m_hasDoneLayout);
+    assert(m_flushDesc.firstPath == m_ctx->m_pathData.elementsWritten());
+    assert(m_flushDesc.firstPaint == m_ctx->m_paintData.elementsWritten());
+    assert(m_flushDesc.firstPaintAux == m_ctx->m_paintAuxData.elementsWritten());
 
     // Wait until here to layout the gradient texture because the final gradient texture height is
     // not decided until after all LogicalFlushes have run layoutResources().
@@ -792,7 +799,7 @@ void PLSRenderContext::LogicalFlush::writeResources()
             {
                 float x = stops[i] * w + .5f;
                 uint32_t xFixed = static_cast<uint32_t>(x * (65536.f / kGradTextureWidth));
-                assert(lastXFixed <= xFixed && xFixed < 65536);
+                assert(lastXFixed <= xFixed && xFixed < 65536); // stops[] must be ordered.
                 m_ctx->m_gradSpanData.set_back(lastXFixed, xFixed, y, lastColor, colors[i]);
                 lastColor = colors[i];
                 lastXFixed = xFixed;
@@ -873,10 +880,15 @@ void PLSRenderContext::LogicalFlush::writeResources()
         {
             PLSDraw* draw = m_plsDraws[i].get();
 
+            int4 drawBounds = simd::load4i(&m_plsDraws[i]->pixelBounds());
+
             // Add one extra pixel of padding to the draw bounds to make absolutely certain we get
             // no overlapping pixels, which destroy the atomic shader.
-            int4 drawBounds = simd::load4i(&m_plsDraws[i]->pixelBounds());
-            drawBounds += int4{-1, -1, 1, 1};
+            const int32_t kMax32i = std::numeric_limits<int32_t>::max();
+            const int32_t kMin32i = std::numeric_limits<int32_t>::min();
+            drawBounds = simd::if_then_else(drawBounds != int4{kMin32i, kMin32i, kMax32i, kMax32i},
+                                            drawBounds + int4{-1, -1, 1, 1},
+                                            drawBounds);
 
             // Our top priority in re-ordering is to group non-overlapping draws together, in order
             // to maximize batching while preserving correctness.
@@ -1004,6 +1016,15 @@ void PLSRenderContext::LogicalFlush::writeResources()
     m_ctx->m_paintData.push_back_n(nullptr, m_paintPaddingCount);
     m_ctx->m_paintAuxData.push_back_n(nullptr, m_paintAuxPaddingCount);
     m_ctx->m_contourData.push_back_n(nullptr, m_contourPaddingCount);
+
+    assert(m_ctx->m_pathData.elementsWritten() ==
+           m_flushDesc.firstPath + m_resourceCounts.pathCount + m_pathPaddingCount);
+    assert(m_ctx->m_paintData.elementsWritten() ==
+           m_flushDesc.firstPaint + m_resourceCounts.pathCount + m_paintPaddingCount);
+    assert(m_ctx->m_paintAuxData.elementsWritten() ==
+           m_flushDesc.firstPaintAux + m_resourceCounts.pathCount + m_paintAuxPaddingCount);
+    assert(m_ctx->m_contourData.elementsWritten() ==
+           m_flushDesc.firstContour + m_resourceCounts.contourCount + m_contourPaddingCount);
 
     assert(m_pathTessLocation == m_expectedPathTessLocationAtEndOfPath);
     assert(m_pathMirroredTessLocation == m_expectedPathMirroredTessLocationAtEndOfPath);
@@ -1337,6 +1358,9 @@ void PLSRenderContext::LogicalFlush::pushPath(PLSPathDraw* draw,
 
     m_currentPathIsStroked = draw->strokeRadius() != 0;
     m_currentPathContourDirections = draw->contourDirections();
+    ++m_currentPathID;
+    assert(0 < m_currentPathID && m_currentPathID <= m_ctx->m_maxPathID);
+
     m_ctx->m_pathData.set_back(draw->matrix(), draw->strokeRadius(), m_currentZIndex);
     m_ctx->m_paintData.set_back(draw->fillRule(),
                                 draw->paintType(),
@@ -1354,12 +1378,10 @@ void PLSRenderContext::LogicalFlush::pushPath(PLSPathDraw* draw,
                                    m_flushDesc.renderTarget,
                                    m_ctx->platformFeatures());
 
-    ++m_currentPathID;
-    assert(0 < m_currentPathID && m_currentPathID <= m_ctx->m_maxPathID);
-    assert(m_flushDesc.firstPath + m_currentPathID == m_ctx->m_pathData.elementsWritten() - 1);
-    assert(m_flushDesc.firstPaint + m_currentPathID == m_ctx->m_paintData.elementsWritten() - 1);
-    assert(m_flushDesc.firstPaintAux + m_currentPathID ==
-           m_ctx->m_paintAuxData.elementsWritten() - 1);
+    assert(m_flushDesc.firstPath + m_currentPathID + 1 == m_ctx->m_pathData.elementsWritten());
+    assert(m_flushDesc.firstPaint + m_currentPathID + 1 == m_ctx->m_paintData.elementsWritten());
+    assert(m_flushDesc.firstPaintAux + m_currentPathID + 1 ==
+           m_ctx->m_paintAuxData.elementsWritten());
 
     pls::DrawType drawType;
     size_t tessLocation;
