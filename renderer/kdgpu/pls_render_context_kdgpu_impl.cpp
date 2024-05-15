@@ -13,6 +13,7 @@
 #include <KDGpu/texture_options.h>
 #include <KDGpu/vulkan/vulkan_render_pass_command_recorder.h>
 #include <KDGpu/vulkan/vulkan_resource_manager.h>
+#include <shaderc/shaderc.hpp>
 
 #include "shaders/constants.glsl"
 
@@ -286,7 +287,7 @@ public:
     };
     if (!mappedOnceAtInitialization) {
       // TODO: originally CopyDst in webgpu, am guessing
-      desc.usage |= KDGpu::BufferUsageFlagBits::TransferDstBit;
+      desc.usage |= KDGpu::BufferUsageFlagBits::TransferSrcBit;
     }
     for (int i = 0; i < bufferCount; ++i) {
       m_buffers[i] = m_device.createBuffer(desc);
@@ -348,13 +349,13 @@ public:
         .type = TextureType::TextureType2D,
         .format = Format::R8G8B8A8_UNORM,
         .extent = Extent3D{.width = width, .height = height, .depth = 1},
+        // TODO: implement mipmap generation.
         .mipLevels = 1,
         // NOTE: originally
         //.usage = wgpu::TextureUsage::TextureBinding |
         // wgpu::TextureUsage::CopyDst,
-        .usage = TextureUsageFlags(TextureUsageFlagBits::TransferDstBit) |
+        .usage = TextureUsageFlags(TextureUsageFlagBits::TransferSrcBit) |
                  TextureUsageFlags(TextureUsageFlagBits::SampledBit),
-        // TODO: implement mipmap generation.
         .memoryUsage = MemoryUsage::CpuToGpu,
     });
 
@@ -398,7 +399,7 @@ public:
           .size = this->capacityInBytes(),
           .usage = usage | KDGpu::BufferUsageFlags(
                                // NOTE: wgpu::BufferUsage::CopyDst originally
-                               KDGpu::BufferUsageFlagBits::TransferDstBit),
+                               KDGpu::BufferUsageFlagBits::TransferSrcBit),
           .memoryUsage = KDGpu::MemoryUsage::CpuToGpu,
       });
     }
@@ -447,7 +448,7 @@ public:
             device, queue,
             pls::StorageTextureBufferSize(capacityInBytes, bufferStructure),
             // NOTE: this originally was wgpu CopySrc
-            KDGpu::BufferUsageFlagBits::TransferDstBit),
+            KDGpu::BufferUsageFlagBits::TransferSrcBit),
         m_bufferStructure(bufferStructure) {
     // Create a texture to mirror the buffer contents.
     auto [textureWidth, textureHeight] =
@@ -480,6 +481,7 @@ public:
     commandRecorder.copyBufferToTexture(BufferToTextureCopy{
         .srcBuffer = submittedBuffer(),
         .dstTexture = m_texture,
+        .dstTextureLayout = TextureLayout::TransferDstOptimal,
         .regions =
             {
                 BufferTextureCopyRegion{
@@ -487,6 +489,9 @@ public:
                     .bufferRowLength = (STORAGE_TEXTURE_WIDTH *
                                         pls::StorageBufferElementSizeInBytes(
                                             m_bufferStructure)),
+                    .textureSubResource =
+                        TextureSubresourceLayers{
+                            .aspectMask = TextureAspectFlagBits::ColorBit},
                     .textureOffset = {0, 0, 0},
                     .textureExtent =
                         {
@@ -560,7 +565,8 @@ void PLSRenderContextKDGpuImpl::resizeGradientTexture(uint32_t width,
       .mipLevels = 1,
       // NOTE: originally RenderAttachment and TextureBinding for wgpu
       .usage = TextureUsageFlags(TextureUsageFlagBits::ColorAttachmentBit) |
-               TextureUsageFlagBits::SampledBit,
+               TextureUsageFlagBits::SampledBit |
+               TextureUsageFlagBits::TransferDstBit,
   });
 
   m_gradientTextureView = m_gradientTexture.createView();
@@ -607,6 +613,7 @@ KDGpu::RenderPassCommandRecorder PLSRenderContextKDGpuImpl::makePLSRenderPass(
                   .loadOperation = loadOp,
                   .storeOperation = AttachmentStoreOperation::Store,
                   .clearValue = clearColor,
+                  .finalLayout = TextureLayout::PresentSrc,
               },
               ColorAttachment{
                   // coverage
@@ -614,6 +621,8 @@ KDGpu::RenderPassCommandRecorder PLSRenderContextKDGpuImpl::makePLSRenderPass(
                   .loadOperation = AttachmentLoadOperation::Clear,
                   .storeOperation = AttachmentStoreOperation::DontCare,
                   .clearValue = {},
+                  // .initialLayout = TextureLayout::Undefined,
+                  // .finalLayout = TextureLayout::ShaderReadOnlyOptimal,
               },
               ColorAttachment{
                   // clip
@@ -621,6 +630,8 @@ KDGpu::RenderPassCommandRecorder PLSRenderContextKDGpuImpl::makePLSRenderPass(
                   .loadOperation = AttachmentLoadOperation::Clear,
                   .storeOperation = AttachmentStoreOperation::DontCare,
                   .clearValue = {},
+                  // .initialLayout = TextureLayout::Undefined,
+                  // .finalLayout = TextureLayout::ShaderReadOnlyOptimal,
               },
               ColorAttachment{
                   // originalDstColor
@@ -628,6 +639,8 @@ KDGpu::RenderPassCommandRecorder PLSRenderContextKDGpuImpl::makePLSRenderPass(
                   .loadOperation = AttachmentLoadOperation::Clear,
                   .storeOperation = AttachmentStoreOperation::DontCare,
                   .clearValue = {},
+                  // .initialLayout = TextureLayout::Undefined,
+                  // .finalLayout = TextureLayout::ShaderReadOnlyOptimal,
               },
           },
   });
@@ -755,6 +768,8 @@ void PLSRenderTargetKDGpu::setTargetTextureView(
   m_targetTextureView = textureView;
 }
 
+/// this version of the function is a misnomer and operates on already compiled
+/// shaders
 static std::vector<uint32_t> charBufferToCode(const uint32_t *buf,
                                               size_t sizeInBytes) {
   std::vector<uint32_t> code;
@@ -764,12 +779,27 @@ static std::vector<uint32_t> charBufferToCode(const uint32_t *buf,
   return code;
 }
 
-static std::vector<uint32_t> charBufferToCode(const char *buf, size_t size) {
-  std::vector<uint32_t> code;
-  code.resize(std::ceil(static_cast<float>(size) / sizeof(uint32_t)));
-  assert(code.size() * sizeof(uint32_t) >= size);
-  std::memcpy(code.data(), buf, size);
-  return code;
+static std::vector<uint32_t>
+charBufferToCode(const char *buf, size_t size,
+                 const char *identifier = "UNKNOWN_SHADER") {
+  using namespace shaderc;
+  Compiler shaderCompiler;
+  SpvCompilationResult compiledShader = shaderCompiler.CompileGlslToSpv(
+      buf, size, shaderc_shader_kind::shaderc_glsl_infer_from_source,
+      identifier);
+
+  printf("ENCOUNTERED %zu ERRORS AND %zu WARNINGS WHILE COMPILING SHADER [ "
+         "%s ]\n",
+         compiledShader.GetNumErrors(), compiledShader.GetNumWarnings(),
+         identifier);
+
+  if (compiledShader.GetCompilationStatus() !=
+      shaderc_compilation_status::shaderc_compilation_status_success) {
+    fprintf(stderr, "SHADER COMPILATION FAILED: %s\n",
+            compiledShader.GetErrorMessage().c_str());
+    return {};
+  }
+  return {compiledShader.cbegin(), compiledShader.cend()};
 }
 
 // Renders color ramps to the gradient texture.
@@ -911,7 +941,8 @@ public:
       vertexGLSL << glsl::common << "\n";
       vertexGLSL << glsl::tessellate << "\n";
       vertexShader = device.createShaderModule(charBufferToCode(
-          vertexGLSL.str().c_str(), vertexGLSL.str().length()));
+          vertexGLSL.str().c_str(), vertexGLSL.str().length(),
+          "disabled storage buffers tesselation vertex shader"));
     } else {
       vertexShader = device.createShaderModule(
           charBufferToCode(tessellate_vert, sizeof(tessellate_vert)));
@@ -1080,8 +1111,9 @@ public:
       vertexGLSL << "#pragma shader_stage(vertex)\n";
       vertexGLSL << "#define " GLSL_VERTEX "\n";
       vertexGLSL << glsl.str();
-      vertexShader = context.device().createShaderModule(
-          charBufferToCode(vertexGLSL.str().c_str(), vertexGLSL.str().size()));
+      vertexShader = context.device().createShaderModule(charBufferToCode(
+          vertexGLSL.str().c_str(), vertexGLSL.str().size(),
+          "disabled storage buffers draw pipeline vertex shader"));
 
       std::ostringstream fragmentGLSL;
       fragmentGLSL << versionString << "\n";
@@ -1089,7 +1121,8 @@ public:
       fragmentGLSL << "#define " GLSL_FRAGMENT "\n";
       fragmentGLSL << glsl.str();
       fragmentShader = context.device().createShaderModule(charBufferToCode(
-          fragmentGLSL.str().c_str(), fragmentGLSL.str().size()));
+          fragmentGLSL.str().c_str(), fragmentGLSL.str().size(),
+          "disabled storage buffers draw pipeline fragment shader"));
     } else {
       switch (drawType) {
       case DrawType::midpointFanPatches:
@@ -1177,8 +1210,9 @@ PLSRenderTargetKDGpu::PLSRenderTargetKDGpu(
 rcp<PLSRenderTargetKDGpu>
 PLSRenderContextKDGpuImpl::makeRenderTarget(KDGpu::Format framebufferFormat,
                                             uint32_t width, uint32_t height) {
-  return rcp(
-      new PLSRenderTargetKDGpu(m_device, framebufferFormat, width, height, {}));
+  return rcp(new PLSRenderTargetKDGpu(
+      m_device, framebufferFormat, width, height,
+      KDGpu::TextureUsageFlagBits::InputAttachmentBit));
 }
 
 static const KDGpu::Buffer &vulkan_buffer(const BufferRing *bufferRing) {
@@ -1221,9 +1255,6 @@ void PLSRenderContextKDGpuImpl::flush(const FlushDescriptor &desc) {
           commandRecorder);
     }
   }
-  // bindgroup for gradient pass which must live after the if statement
-  // enclosing the gradpass
-  BindGroup gradientBindings;
 
   // Render the complex color ramps to the gradient texture.
   if (desc.complexGradSpanCount > 0) {
@@ -1233,7 +1264,7 @@ void PLSRenderContextKDGpuImpl::flush(const FlushDescriptor &desc) {
     const auto &gradSpanBuffers =
         *static_cast<const BufferKDGpu *>(gradSpanBufferRing());
 
-    gradientBindings = m_device.createBindGroup(BindGroupOptions{
+    m_gradientBindings = m_device.createBindGroup(BindGroupOptions{
         .layout = m_colorRampPipeline->bindGroupLayout(),
         .resources =
             {
@@ -1256,6 +1287,7 @@ void PLSRenderContextKDGpuImpl::flush(const FlushDescriptor &desc) {
                 .loadOperation = AttachmentLoadOperation::Clear,
                 .storeOperation = AttachmentStoreOperation::Store,
                 .clearValue = ColorClearValue{},
+                .finalLayout = TextureLayout::TransferDstOptimal,
             }}});
 
     gradPass.setViewport(Viewport{
@@ -1267,7 +1299,7 @@ void PLSRenderContextKDGpuImpl::flush(const FlushDescriptor &desc) {
 
     gradPass.setPipeline(m_colorRampPipeline->renderPipeline());
     gradPass.setVertexBuffer(0, gradSpanBuffers.submittedBuffer());
-    gradPass.setBindGroup(0, gradientBindings);
+    gradPass.setBindGroup(0, m_gradientBindings);
     gradPass.draw(DrawCommand{
         .vertexCount = 4,
         .instanceCount = static_cast<uint32_t>(desc.complexGradSpanCount),
@@ -1285,6 +1317,7 @@ void PLSRenderContextKDGpuImpl::flush(const FlushDescriptor &desc) {
     commandRecorder.copyBufferToTexture(BufferToTextureCopy{
         .srcBuffer = simpleColorRampsBuffers.submittedBuffer(),
         .dstTexture = m_gradientTexture,
+        .dstTextureLayout = TextureLayout::TransferDstOptimal,
         .regions = {
             BufferTextureCopyRegion{
                 .bufferOffset = desc.simpleGradDataOffsetInBytes,
@@ -1296,10 +1329,6 @@ void PLSRenderContextKDGpuImpl::flush(const FlushDescriptor &desc) {
                     }},
         }});
   }
-
-  // bindgroup used for tesselation which must live past the enclosing if
-  // statement
-  KDGpu::BindGroup tesselationBindings;
 
   // Tessellate all curves into vertices in the tessellation texture.
   if (desc.tessVertexSpanCount > 0) {
@@ -1347,7 +1376,7 @@ void PLSRenderContextKDGpuImpl::flush(const FlushDescriptor &desc) {
       }
     };
 
-    tesselationBindings = m_device.createBindGroup(BindGroupOptions{
+    m_tesselationBindings = m_device.createBindGroup(BindGroupOptions{
         .layout = m_tessellatePipeline->bindGroupLayout(),
         .resources =
             {
@@ -1382,6 +1411,7 @@ void PLSRenderContextKDGpuImpl::flush(const FlushDescriptor &desc) {
                         .loadOperation = AttachmentLoadOperation::Clear,
                         .storeOperation = AttachmentStoreOperation::Store,
                         .clearValue = ColorClearValue{},
+                        .finalLayout = TextureLayout::ShaderReadOnlyOptimal,
                     },
                 },
         });
@@ -1397,7 +1427,7 @@ void PLSRenderContextKDGpuImpl::flush(const FlushDescriptor &desc) {
         0, static_cast<const BufferKDGpu *>(tessSpanBufferRing())
                ->submittedBuffer());
     tessPass.setIndexBuffer(m_tessSpanIndexBuffer, 0, IndexType::Uint16);
-    tessPass.setBindGroup(0, tesselationBindings);
+    tessPass.setBindGroup(0, m_tesselationBindings);
     tessPass.drawIndexed(DrawIndexedCommand{
         .indexCount = std::size(pls::kTessSpanIndices),
         .instanceCount = static_cast<uint32_t>(desc.tessVertexSpanCount),

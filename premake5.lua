@@ -39,7 +39,7 @@ do
         defines({ 'SPDLOG_FMT_EXTERNAL' })
         cppdialect('C++20')
         disablewarnings({ 'deprecated' })
-        links({ 'KDGpu', 'KDGui', 'fmt' })
+        links({ 'KDGpu', 'KDGui', 'fmt', 'shaderc_shared' })
     end
 
     filter('options:with-skia')
