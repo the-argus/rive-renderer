@@ -155,6 +155,8 @@ private:
 
   // per-frame resources
   KDGpu::CommandBuffer m_commandBuffer;
+  KDGpu::BindGroup m_tesselationBindings;
+  KDGpu::BindGroup m_gradientBindings;
 
   // caching resources (used per-frame)
   std::vector<KDGpu::BindGroup> m_frameBindings;

@@ -96,6 +96,12 @@ private:
 
   void createSwapchain(int width, int height);
 
+  // integration
+  std::unique_ptr<KDGpu::GraphicsApi> m_api;
+  KDGpu::Instance m_instance;
+  std::optional<KDGpu::Surface> m_surface;
+  KDGpu::Adapter *m_adapter;
+
   // pipeline and rendering resources
   std::unique_ptr<PLSRenderContext> m_plsContext;
   rcp<PLSRenderTargetKDGpu> m_renderTarget;
@@ -105,12 +111,6 @@ private:
   KDGpu::Swapchain m_swapchain;
   std::vector<KDGpu::TextureView> m_swapchainViews;
   uint32_t m_currentImageIndex;
-
-  // integration
-  std::unique_ptr<KDGpu::GraphicsApi> m_api;
-  KDGpu::Instance m_instance;
-  std::optional<KDGpu::Surface> m_surface;
-  KDGpu::Adapter *m_adapter;
 
   // we synchronously copy pixels from the screen into memory every frame
   std::optional<KDGpu::Buffer> m_pixelReadBuff;
@@ -139,7 +139,8 @@ FiddleContextKDGpu::FiddleContextKDGpu() {
 
   m_plsContext = PLSRenderContextKDGpuImpl::MakeContext(
       std::move(device), std::move(queue),
-      PLSRenderContextKDGpuImpl::ContextOptions{}, PlatformFeatures{});
+      PLSRenderContextKDGpuImpl::ContextOptions{.disableStorageBuffers = false},
+      PlatformFeatures{});
 
   Device &contextOwnedDevice =
       m_plsContext->static_impl_cast<PLSRenderContextKDGpuImpl>()->device();
@@ -193,9 +194,7 @@ void FiddleContextKDGpu::begin(
 void FiddleContextKDGpu::end(GLFWwindow *window,
                              std::vector<uint8_t> *pixelData) {
   using namespace KDGpu;
-  m_plsContext->flush(PLSRenderContext::FlushResources{
-      .renderTarget = m_renderTarget.get(),
-  });
+  flushPLSContext();
 
   if (pixelData != nullptr) {
     m_pixelCopyFence.reset();
