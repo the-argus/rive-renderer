@@ -279,6 +279,7 @@ enum class API
     metal,
     d3d,
     dawn,
+    kdgpu,
 };
 
 API api =
@@ -334,6 +335,10 @@ int main(int argc, const char** argv)
         if (!strcmp(argv[i], "--gl"))
         {
             api = API::gl;
+        }
+        if (!strcmp(argv[i], "--kdgpu"))
+        {
+            api = API::kdgpu;
         }
         else if (!strcmp(argv[i], "--metal"))
         {
@@ -423,6 +428,7 @@ int main(int argc, const char** argv)
     {
         case API::metal:
         case API::d3d:
+        case API::kdgpu:
         case API::dawn:
             glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
             glfwWindowHint(GLFW_COCOA_RETINA_FRAMEBUFFER, GLFW_TRUE);
@@ -496,6 +502,14 @@ int main(int argc, const char** argv)
                 break;
             }
             s_fiddleContext = FiddleContext::MakeGLPLS();
+            break;
+        case API::kdgpu:
+            if (skia)
+            {
+                fprintf(stderr, "Skia not supported on kdgpu yet.\n");
+                break;
+            }
+            s_fiddleContext = FiddleContext::MakeKDGpu();
             break;
     }
     if (!s_fiddleContext)
