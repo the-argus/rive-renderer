@@ -15,8 +15,6 @@
 #include <KDGpu/vulkan/vulkan_resource_manager.h>
 #include <shaderc/shaderc.hpp>
 
-#include "shaders/constants.glsl"
-
 #include "shaders/out/generated/spirv/color_ramp.frag.h"
 #include "shaders/out/generated/spirv/color_ramp.vert.h"
 #include "shaders/out/generated/spirv/draw_image_mesh.frag.h"
@@ -28,6 +26,8 @@
 #include "shaders/out/generated/spirv/tessellate.frag.h"
 #include "shaders/out/generated/spirv/tessellate.vert.h"
 
+// glsl for subpassLoad, where shaders are generated on the fly
+#include "shaders/constants.glsl"
 #include "shaders/out/generated/advanced_blend.glsl.hpp"
 #include "shaders/out/generated/common.glsl.hpp"
 #include "shaders/out/generated/constants.glsl.hpp"
@@ -35,7 +35,6 @@
 #include "shaders/out/generated/draw_path.glsl.hpp"
 #include "shaders/out/generated/draw_path_common.glsl.hpp"
 #include "shaders/out/generated/glsl.glsl.hpp"
-#include "shaders/out/generated/tessellate.glsl.hpp"
 
 #include <sstream>
 
@@ -76,6 +75,7 @@ PLSRenderContextKDGpuImpl::PLSRenderContextKDGpuImpl(
 
   m_drawBindGroupLayouts[0] =
       m_device.createBindGroupLayout(BindGroupLayoutOptions{
+          .label = "drawbindGroupLayouts[0]",
           .bindings =
               {
                   {
@@ -102,36 +102,28 @@ PLSRenderContextKDGpuImpl::PLSRenderContextKDGpuImpl(
                   {
                       .binding = PATH_BUFFER_IDX,
                       .count = 1,
-                      .resourceType = m_contextOptions.disableStorageBuffers
-                                          ? ResourceBindingType::SampledImage
-                                          : ResourceBindingType::StorageBuffer,
+                      .resourceType = ResourceBindingType::StorageBuffer,
                       .shaderStages =
                           ShaderStageFlags(ShaderStageFlagBits::VertexBit),
                   },
                   {
                       .binding = PAINT_BUFFER_IDX,
                       .count = 1,
-                      .resourceType = m_contextOptions.disableStorageBuffers
-                                          ? ResourceBindingType::SampledImage
-                                          : ResourceBindingType::StorageBuffer,
+                      .resourceType = ResourceBindingType::StorageBuffer,
                       .shaderStages =
                           ShaderStageFlags(ShaderStageFlagBits::VertexBit),
                   },
                   {
                       .binding = PAINT_AUX_BUFFER_IDX,
                       .count = 1,
-                      .resourceType = m_contextOptions.disableStorageBuffers
-                                          ? ResourceBindingType::SampledImage
-                                          : ResourceBindingType::StorageBuffer,
+                      .resourceType = ResourceBindingType::StorageBuffer,
                       .shaderStages =
                           ShaderStageFlags(ShaderStageFlagBits::VertexBit),
                   },
                   {
                       .binding = CONTOUR_BUFFER_IDX,
                       .count = 1,
-                      .resourceType = m_contextOptions.disableStorageBuffers
-                                          ? ResourceBindingType::SampledImage
-                                          : ResourceBindingType::StorageBuffer,
+                      .resourceType = ResourceBindingType::StorageBuffer,
                       .shaderStages =
                           ShaderStageFlags(ShaderStageFlagBits::VertexBit),
                   },
@@ -153,9 +145,48 @@ PLSRenderContextKDGpuImpl::PLSRenderContextKDGpuImpl(
               },
       });
 
+  if (m_contextOptions.plsType == PixelLocalStorageType::subpassLoad) {
+    static_assert(FRAMEBUFFER_PLANE_IDX == 0);
+    static_assert(COVERAGE_PLANE_IDX == 1);
+    static_assert(CLIP_PLANE_IDX == 2);
+    static_assert(ORIGINAL_DST_COLOR_PLANE_IDX == 3);
+    m_drawBindGroupLayouts[PLS_TEXTURE_BINDINGS_SET] =
+        m_device.createBindGroupLayout(BindGroupLayoutOptions{
+            .label = "drawbindGroupLayouts[PLS_TEXTURE_BINDINGS_SET]",
+            .bindings =
+                {
+                    ResourceBindingLayout{
+                        .binding = FRAMEBUFFER_PLANE_IDX,
+                        .count = 1,
+                        .resourceType = ResourceBindingType::InputAttachment,
+                        .shaderStages = ShaderStageFlagBits::FragmentBit,
+                    },
+                    ResourceBindingLayout{
+                        .binding = COVERAGE_PLANE_IDX,
+                        .count = 1,
+                        .resourceType = ResourceBindingType::InputAttachment,
+                        .shaderStages = ShaderStageFlagBits::FragmentBit,
+                    },
+                    ResourceBindingLayout{
+                        .binding = CLIP_PLANE_IDX,
+                        .count = 1,
+                        .resourceType = ResourceBindingType::SampledImage,
+                        .shaderStages = ShaderStageFlagBits::FragmentBit,
+                    },
+                    ResourceBindingLayout{
+                        .binding = ORIGINAL_DST_COLOR_PLANE_IDX,
+                        .count = 1,
+                        .resourceType = ResourceBindingType::InputAttachment,
+                        .shaderStages = ShaderStageFlagBits::FragmentBit,
+                    },
+                },
+        });
+  };
+
   // describe the size and number of resources for samplers in frag shader
   m_drawBindGroupLayouts[SAMPLER_BINDINGS_SET] =
       m_device.createBindGroupLayout(BindGroupLayoutOptions{
+          .label = "drawbindGroupLayouts[SAMPLER_BINDINGS_SET]",
           .bindings =
               {
                   {
@@ -177,6 +208,7 @@ PLSRenderContextKDGpuImpl::PLSRenderContextKDGpuImpl(
 
   // create the samplers for each of the textures
   m_linearSampler = m_device.createSampler(SamplerOptions{
+      .label = "m_linearSampler",
       .magFilter = FilterMode::Linear,
       .minFilter = FilterMode::Linear,
       .mipmapFilter = MipmapFilterMode::Nearest,
@@ -185,6 +217,7 @@ PLSRenderContextKDGpuImpl::PLSRenderContextKDGpuImpl(
   });
 
   m_mipmapSampler = m_device.createSampler(SamplerOptions{
+      .label = "mipmapSampler",
       .magFilter = FilterMode::Linear,
       .minFilter = FilterMode::Linear,
       .mipmapFilter = MipmapFilterMode::Nearest,
@@ -195,6 +228,7 @@ PLSRenderContextKDGpuImpl::PLSRenderContextKDGpuImpl(
   // pass in the description of size and number of samplers, and provide
   // the actual sampler handles which the bind group will keep reference of.
   m_samplerBindings = m_device.createBindGroup(BindGroupOptions{
+      .label = "samplerBindings",
       .layout = m_drawBindGroupLayouts[SAMPLER_BINDINGS_SET],
       .resources =
           {
@@ -210,11 +244,16 @@ PLSRenderContextKDGpuImpl::PLSRenderContextKDGpuImpl(
   });
 
   // copy handles to our layouts into a vector and pass them into a pipeline
-  // layout's constructor
+  // layout's constructor. skip pls bindings if they are unused
   std::vector<Handle<BindGroupLayout_t>> layouts;
   layouts.reserve(m_drawBindGroupLayouts.size());
-  for (auto &layout : m_drawBindGroupLayouts)
-    layouts.emplace_back(layout);
+  assert(m_drawBindGroupLayouts.size() >= 2);
+  layouts.emplace_back(m_drawBindGroupLayouts[0]);
+  layouts.emplace_back(m_drawBindGroupLayouts[1]);
+  if (m_contextOptions.plsType == PixelLocalStorageType::subpassLoad) {
+    assert(m_drawBindGroupLayouts.size() >= 3);
+    layouts.emplace_back(m_drawBindGroupLayouts[2]);
+  }
 
   m_drawPipelineLayout = m_device.createPipelineLayout(PipelineLayoutOptions{
       .bindGroupLayouts = std::move(layouts),
@@ -411,6 +450,12 @@ public:
     return m_buffers[submittedBufferIdx()];
   }
 
+  ~BufferKDGpu() {
+    for (auto &buf : m_buffers) {
+      buf.unmap();
+    }
+  }
+
 protected:
   void *onMapBuffer(int bufferIdx, size_t mapSizeInBytes) override {
     return shadowBuffer();
@@ -418,7 +463,6 @@ protected:
 
   void onUnmapAndSubmitBuffer(int bufferIdx, size_t mapSizeInBytes) override {
     std::memcpy(m_buffers[bufferIdx].map(), shadowBuffer(), mapSizeInBytes);
-    // NOTE: why are we not unmapping after doing this?
   }
 
   const KDGpu::Queue &m_queue;
@@ -439,119 +483,6 @@ storage_texture_format(pls::StorageBufferStructure bufferStructure) {
   RIVE_UNREACHABLE();
 }
 
-// Buffer ring with a texture used to polyfill storage buffers when they are
-// disabled.
-class StorageTextureBufferKDGpu : public BufferKDGpu {
-public:
-  StorageTextureBufferKDGpu(KDGpu::Device &device, KDGpu::Queue &queue,
-                            size_t capacityInBytes,
-                            pls::StorageBufferStructure bufferStructure)
-      : BufferKDGpu(
-            device, queue,
-            pls::StorageTextureBufferSize(capacityInBytes, bufferStructure),
-            // NOTE: this originally was wgpu CopySrc
-            KDGpu::BufferUsageFlagBits::TransferSrcBit),
-        m_bufferStructure(bufferStructure) {
-    // Create a texture to mirror the buffer contents.
-    auto [textureWidth, textureHeight] =
-        pls::StorageTextureSize(this->capacityInBytes(), bufferStructure);
-
-    using namespace KDGpu;
-    m_texture = device.createTexture(KDGpu::TextureOptions{
-        .label = "UNKNOWN_STORAGE_TEXTURE_BUFFER",
-        .type = TextureType::TextureType2D,
-        .format = storage_texture_format(bufferStructure),
-        .extent =
-            {
-                .width = textureWidth,
-                .height = textureHeight,
-                .depth = 1,
-            },
-        .mipLevels = 1,
-        .usage = KDGpu::TextureUsageFlags(TextureUsageFlagBits::SampledBit) |
-                 KDGpu::TextureUsageFlagBits::TransferDstBit,
-    });
-    m_textureView = m_texture.createView();
-  }
-
-  void updateTextureFromBuffer(size_t bindingSizeInBytes,
-                               size_t offsetSizeInBytes,
-                               KDGpu::CommandRecorder &commandRecorder) const {
-    using namespace KDGpu;
-    auto [updateWidth, updateHeight] =
-        pls::StorageTextureSize(bindingSizeInBytes, m_bufferStructure);
-
-    // before transfer phase, we need to be in TransferDstOptimal layout
-    commandRecorder.textureMemoryBarrier(TextureMemoryBarrierOptions{
-        .srcStages = PipelineStageFlagBit::TopOfPipeBit,
-        .srcMask = AccessFlagBit::None,
-        .dstStages = PipelineStageFlagBit::TransferBit,
-        .dstMask = AccessFlagBit::TransferWriteBit,
-        .oldLayout = m_textureLayout,
-        .newLayout = TextureLayout::TransferDstOptimal,
-        .texture = m_texture,
-        .range =
-            {
-                .aspectMask = TextureAspectFlagBits::ColorBit,
-                .levelCount = 1,
-            },
-    });
-
-    // perform transfer
-    commandRecorder.copyBufferToTexture(BufferToTextureCopy{
-        .srcBuffer = submittedBuffer(),
-        .dstTexture = m_texture,
-        .dstTextureLayout = TextureLayout::TransferDstOptimal,
-        .regions =
-            {
-                BufferTextureCopyRegion{
-                    .bufferOffset = offsetSizeInBytes,
-                    .bufferRowLength = (STORAGE_TEXTURE_WIDTH *
-                                        pls::StorageBufferElementSizeInBytes(
-                                            m_bufferStructure)),
-                    .textureSubResource =
-                        TextureSubresourceLayers{
-                            .aspectMask = TextureAspectFlagBits::ColorBit},
-                    .textureOffset = {0, 0, 0},
-                    .textureExtent =
-                        {
-                            .width = updateWidth,
-                            .height = updateHeight,
-                            .depth = 1,
-                        },
-                },
-            },
-    });
-
-    // after transfer phase, before fragment shader, we need to be in shader
-    // read only optimal so we can be sampled from
-    commandRecorder.textureMemoryBarrier(TextureMemoryBarrierOptions{
-        .srcStages = PipelineStageFlagBit::TransferBit,
-        .srcMask = AccessFlagBit::TransferWriteBit,
-        .dstStages = PipelineStageFlagBit::FragmentShaderBit,
-        .dstMask = AccessFlagBit::ShaderReadBit,
-        .oldLayout = TextureLayout::TransferDstOptimal,
-        .newLayout = TextureLayout::ShaderReadOnlyOptimal,
-        .texture = m_texture,
-        .range =
-            {
-                .aspectMask = TextureAspectFlagBits::ColorBit,
-                .levelCount = 1,
-            },
-    });
-    m_textureLayout = TextureLayout::ShaderReadOnlyOptimal;
-  }
-
-  const KDGpu::TextureView &textureView() const { return m_textureView; }
-
-private:
-  const StorageBufferStructure m_bufferStructure;
-  KDGpu::Texture m_texture;
-  KDGpu::TextureView m_textureView;
-  mutable KDGpu::TextureLayout m_textureLayout =
-      KDGpu::TextureLayout::Undefined;
-};
-
 std::unique_ptr<BufferRing>
 PLSRenderContextKDGpuImpl::makeUniformBufferRing(size_t capacityInBytes) {
   // Uniform blocks must be multiples of 256 bytes in size.
@@ -565,14 +496,9 @@ PLSRenderContextKDGpuImpl::makeUniformBufferRing(size_t capacityInBytes) {
 
 std::unique_ptr<BufferRing> PLSRenderContextKDGpuImpl::makeStorageBufferRing(
     size_t capacityInBytes, pls::StorageBufferStructure bufferStructure) {
-  if (m_contextOptions.disableStorageBuffers) {
-    return std::make_unique<StorageTextureBufferKDGpu>(
-        m_device, m_queue, capacityInBytes, bufferStructure);
-  } else {
-    return std::make_unique<BufferKDGpu>(
-        m_device, m_queue, capacityInBytes,
-        KDGpu::BufferUsageFlagBits::StorageBufferBit);
-  }
+  return std::make_unique<BufferKDGpu>(
+      m_device, m_queue, capacityInBytes,
+      KDGpu::BufferUsageFlagBits::StorageBufferBit);
 }
 
 std::unique_ptr<BufferRing>
@@ -663,8 +589,6 @@ KDGpu::RenderPassCommandRecorder PLSRenderContextKDGpuImpl::makePLSRenderPass(
                   .loadOperation = AttachmentLoadOperation::Clear,
                   .storeOperation = AttachmentStoreOperation::DontCare,
                   .clearValue = {},
-                  // .initialLayout = TextureLayout::Undefined,
-                  // .finalLayout = TextureLayout::ShaderReadOnlyOptimal,
               },
               ColorAttachment{
                   // clip
@@ -672,8 +596,6 @@ KDGpu::RenderPassCommandRecorder PLSRenderContextKDGpuImpl::makePLSRenderPass(
                   .loadOperation = AttachmentLoadOperation::Clear,
                   .storeOperation = AttachmentStoreOperation::DontCare,
                   .clearValue = {},
-                  // .initialLayout = TextureLayout::Undefined,
-                  // .finalLayout = TextureLayout::ShaderReadOnlyOptimal,
               },
               ColorAttachment{
                   // originalDstColor
@@ -681,8 +603,6 @@ KDGpu::RenderPassCommandRecorder PLSRenderContextKDGpuImpl::makePLSRenderPass(
                   .loadOperation = AttachmentLoadOperation::Clear,
                   .storeOperation = AttachmentStoreOperation::DontCare,
                   .clearValue = {},
-                  // .initialLayout = TextureLayout::Undefined,
-                  // .finalLayout = TextureLayout::ShaderReadOnlyOptimal,
               },
           },
   });
@@ -695,6 +615,7 @@ KDGpu::GraphicsPipeline PLSRenderContextKDGpuImpl::makePLSDrawPipeline(
   using namespace KDGpu;
   std::vector<VertexAttribute> attrs;
   std::vector<VertexBufferLayout> vertexBufferLayouts;
+  bool sbpLoad = m_contextOptions.plsType == PixelLocalStorageType::subpassLoad;
   switch (drawType) {
   case DrawType::midpointFanPatches:
   case DrawType::outerCurvePatches: {
@@ -713,7 +634,10 @@ KDGpu::GraphicsPipeline PLSRenderContextKDGpuImpl::makePLSDrawPipeline(
 
     vertexBufferLayouts = {
         {
-            .stride = sizeof(pls::PatchVertex),
+            // .stride = sizeof(pls::PatchVertex),
+            // .stride = 8 * sizeof(float),
+            .stride = static_cast<uint32_t>(sbpLoad ? 8 * sizeof(float)
+                                                    : sizeof(pls::PatchVertex)),
             .inputRate = VertexRate::Vertex,
         },
     };
@@ -736,9 +660,40 @@ KDGpu::GraphicsPipeline PLSRenderContextKDGpuImpl::makePLSDrawPipeline(
     };
     break;
   }
-  case DrawType::imageRect:
-    RIVE_UNREACHABLE();
-  case DrawType::imageMesh:
+  case DrawType::imageRect: // 3
+    if (sbpLoad) {
+      attrs = {
+          {
+              .location = 0,
+              .format = Format::R32G32_SFLOAT,
+              .offset = 0,
+          },
+          {
+              .location = 1,
+              .format = Format::R32G32_SFLOAT,
+              .offset = 0,
+          },
+      };
+
+      vertexBufferLayouts = {
+          // NOTE: in the webgpu version of this, they assign this first vertex
+          // buffer layout to only be associated with the first of the two
+          // vertex attributes written above, and the second buffer layout only
+          // with the second attribute.
+          {
+              .stride = 2 * sizeof(float),
+              .inputRate = VertexRate::Vertex,
+          },
+          {
+              .stride = 2 * sizeof(float),
+              .inputRate = VertexRate::Vertex,
+          },
+      };
+    } else {
+      RIVE_UNREACHABLE();
+    }
+  case DrawType::imageMesh: // 4
+    assert(!sbpLoad);
     attrs = {
         {
             .location = 0,
@@ -774,11 +729,24 @@ KDGpu::GraphicsPipeline PLSRenderContextKDGpuImpl::makePLSDrawPipeline(
   static_assert(CLIP_PLANE_IDX == 2);
   static_assert(ORIGINAL_DST_COLOR_PLANE_IDX == 3);
 
+  bool isNotImageDraw = sbpLoad ? (drawType != DrawType::imageRect)
+                                : (drawType != DrawType::imageMesh);
+
+  const CullModeFlags cullMode =
+      isNotImageDraw ? CullModeFlagBits::BackBit : CullModeFlagBits::None;
+
   return m_device.createGraphicsPipeline(GraphicsPipelineOptions{
-      .shaderStages = {{.shaderModule = vertexShader,
-                        .stage = ShaderStageFlagBits::VertexBit},
-                       {.shaderModule = fragmentShader,
-                        .stage = ShaderStageFlagBits::FragmentBit}},
+      .shaderStages =
+          {
+              ShaderStage{
+                  .shaderModule = vertexShader,
+                  .stage = ShaderStageFlagBits::VertexBit,
+              },
+              ShaderStage{
+                  .shaderModule = fragmentShader,
+                  .stage = ShaderStageFlagBits::FragmentBit,
+              },
+          },
       .layout = m_drawPipelineLayout,
       .vertex =
           {
@@ -795,9 +763,7 @@ KDGpu::GraphicsPipeline PLSRenderContextKDGpuImpl::makePLSDrawPipeline(
       .primitive =
           {
               .topology = PrimitiveTopology::TriangleList,
-              .cullMode = drawType != DrawType::imageMesh
-                              ? CullModeFlagBits::BackBit
-                              : CullModeFlagBits::None,
+              .cullMode = cullMode,
               .frontFace = FrontFace::Clockwise,
           },
   });
@@ -877,11 +843,11 @@ public:
         .shaderStages =
             {
                 {
-                    .shaderModule = vertexShader.handle(),
+                    .shaderModule = vertexShader,
                     .stage = ShaderStageFlagBits::VertexBit,
                 },
                 {
-                    .shaderModule = fragmentShader.handle(),
+                    .shaderModule = fragmentShader,
                     .stage = ShaderStageFlagBits::FragmentBit,
                 },
             },
@@ -937,18 +903,14 @@ public:
             {
                 .binding = PATH_BUFFER_IDX,
                 .count = 1,
-                .resourceType = contextOptions.disableStorageBuffers
-                                    ? ResourceBindingType::SampledImage
-                                    : ResourceBindingType::StorageBuffer,
+                .resourceType = ResourceBindingType::StorageBuffer,
                 .shaderStages =
                     ShaderStageFlags(ShaderStageFlagBits::VertexBit),
             },
             {
                 .binding = CONTOUR_BUFFER_IDX,
                 .count = 1,
-                .resourceType = contextOptions.disableStorageBuffers
-                                    ? ResourceBindingType::SampledImage
-                                    : ResourceBindingType::StorageBuffer,
+                .resourceType = ResourceBindingType::StorageBuffer,
                 .shaderStages =
                     ShaderStageFlags(ShaderStageFlagBits::VertexBit),
             },
@@ -969,28 +931,8 @@ public:
         .bindGroupLayouts = {m_bindGroupLayout},
     });
 
-    if (contextOptions.disableStorageBuffers) {
-      // The built-in SPIRV does not #define DISABLE_SHADER_STORAGE_BUFFERS.
-      // Recompile the tessellation shader with storage buffers disabled.
-      std::ostringstream vertexGLSL;
-      vertexGLSL << "#version 460\n";
-      vertexGLSL << "#pragma shader_stage(vertex)\n";
-      vertexGLSL << "#define " GLSL_VERTEX "\n";
-      vertexGLSL << "#define " GLSL_DISABLE_SHADER_STORAGE_BUFFERS "\n";
-      vertexGLSL << "#define " GLSL_TARGET_VULKAN "\n";
-      vertexGLSL
-          << "#extension GL_EXT_samplerless_texture_functions : enable\n";
-      vertexGLSL << glsl::glsl << "\n";
-      vertexGLSL << glsl::constants << "\n";
-      vertexGLSL << glsl::common << "\n";
-      vertexGLSL << glsl::tessellate << "\n";
-      vertexShader = device.createShaderModule(charBufferToCode(
-          vertexGLSL.str().c_str(), vertexGLSL.str().length(),
-          "disabled storage buffers tesselation vertex shader"));
-    } else {
-      vertexShader = device.createShaderModule(
-          charBufferToCode(tessellate_vert, sizeof(tessellate_vert)));
-    }
+    vertexShader = device.createShaderModule(
+        charBufferToCode(tessellate_vert, sizeof(tessellate_vert)));
 
     m_renderPipeline = device.createGraphicsPipeline(GraphicsPipelineOptions{
         .shaderStages =
@@ -1067,8 +1009,7 @@ public:
     PixelLocalStorageType plsType = context.m_contextOptions.plsType;
     KDGpu::ShaderModule vertexShader, fragmentShader;
 
-    if (contextOptions.disableStorageBuffers) {
-
+    if (plsType == PixelLocalStorageType::subpassLoad) {
       const char *language = "glsl";
       const char *versionString = "#version 460";
 
@@ -1078,8 +1019,9 @@ public:
       };
       glsl << "#extension GL_EXT_samplerless_texture_functions : enable\n";
       addDefine(GLSL_TARGET_VULKAN);
-      addDefine(GLSL_PLS_IMPL_NONE);
-      addDefine(GLSL_DISABLE_SHADER_STORAGE_BUFFERS);
+      addDefine(plsType == PixelLocalStorageType::subpassLoad
+                    ? GLSL_PLS_IMPL_SUBPASS_LOAD
+                    : GLSL_PLS_IMPL_NONE);
 
       switch (drawType) {
       case DrawType::midpointFanPatches:
@@ -1223,7 +1165,8 @@ private:
 
 PLSRenderTargetKDGpu::PLSRenderTargetKDGpu(
     KDGpu::Device &device, KDGpu::Format framebufferFormat, uint32_t width,
-    uint32_t height, KDGpu::TextureUsageFlags additionalTextureFlags)
+    uint32_t height, KDGpu::TextureUsageFlags additionalTextureFlags,
+    const PLSOptions::ContextOptions &options)
     : PLSRenderTarget(width, height), m_framebufferFormat(framebufferFormat) {
   using namespace KDGpu;
   KDGpu::TextureOptions desc{
@@ -1233,9 +1176,14 @@ PLSRenderTargetKDGpu::PLSRenderTargetKDGpu(
                  .height = static_cast<uint32_t>(height),
                  .depth = 1},
       .mipLevels = 1,
-      .usage = TextureUsageFlags(TextureUsageFlagBits::ColorAttachmentBit) |
-               additionalTextureFlags,
+      .usage =
+          additionalTextureFlags | TextureUsageFlagBits::ColorAttachmentBit,
   };
+
+  if (options.plsType == PLSOptions::PixelLocalStorageType::subpassLoad) {
+    // desc.usage |= TextureUsageFlagBits::TransientAttachmentBit;
+    desc.usage |= TextureUsageFlagBits::SampledBit;
+  }
 
   desc.label = "coverageTexture";
   m_coverageTexture = device.createTexture(desc);
@@ -1247,29 +1195,19 @@ PLSRenderTargetKDGpu::PLSRenderTargetKDGpu(
   m_originalDstColorTexture = device.createTexture(desc);
 
   m_targetTextureView = {};
-  m_coverageTextureView = m_coverageTexture.createView();
-  m_clipTextureView = m_clipTexture.createView();
-  m_originalDstColorTextureView = m_originalDstColorTexture.createView();
+  m_coverageTextureView =
+      m_coverageTexture.createView({.label = "coverageTextureView"});
+  m_clipTextureView = m_clipTexture.createView({.label = "clipTextureView"});
+  m_originalDstColorTextureView = m_originalDstColorTexture.createView(
+      {.label = "originalDstColorTextureView"});
 }
 
 rcp<PLSRenderTargetKDGpu>
 PLSRenderContextKDGpuImpl::makeRenderTarget(KDGpu::Format framebufferFormat,
                                             uint32_t width, uint32_t height) {
-  return rcp(new PLSRenderTargetKDGpu(
-      m_device, framebufferFormat, width, height,
-      KDGpu::TextureUsageFlagBits::InputAttachmentBit));
-}
-
-template <typename HighLevelStruct>
-void update_storage_texture(const BufferRing *bufferRing, size_t bindingCount,
-                            size_t firstElement,
-                            KDGpu::CommandRecorder &recorder) {
-  assert(bufferRing != nullptr);
-  auto storageTextureBuffer =
-      static_cast<const StorageTextureBufferKDGpu *>(bufferRing);
-  storageTextureBuffer->updateTextureFromBuffer(
-      bindingCount * sizeof(HighLevelStruct),
-      firstElement * sizeof(HighLevelStruct), recorder);
+  using namespace KDGpu;
+  return rcp(new PLSRenderTargetKDGpu(m_device, framebufferFormat, width,
+                                      height, {}, m_contextOptions));
 }
 
 void PLSRenderContextKDGpuImpl::flush(const FlushDescriptor &desc) {
@@ -1277,24 +1215,6 @@ void PLSRenderContextKDGpuImpl::flush(const FlushDescriptor &desc) {
   auto *renderTarget =
       static_cast<const PLSRenderTargetKDGpu *>(desc.renderTarget);
   CommandRecorder commandRecorder = m_device.createCommandRecorder();
-
-  // If storage buffers are disabled, copy their contents to textures.
-  if (m_contextOptions.disableStorageBuffers) {
-    if (desc.pathCount > 0) {
-      update_storage_texture<pls::PathData>(pathBufferRing(), desc.pathCount,
-                                            desc.firstPath, commandRecorder);
-      update_storage_texture<pls::PaintData>(paintBufferRing(), desc.pathCount,
-                                             desc.firstPaint, commandRecorder);
-      update_storage_texture<pls::PaintAuxData>(
-          paintAuxBufferRing(), desc.pathCount, desc.firstPaintAux,
-          commandRecorder);
-    }
-    if (desc.contourCount > 0) {
-      update_storage_texture<pls::ContourData>(
-          contourBufferRing(), desc.contourCount, desc.firstContour,
-          commandRecorder);
-    }
-  }
 
   // Render the complex color ramps to the gradient texture.
   if (desc.complexGradSpanCount > 0) {
@@ -1362,12 +1282,17 @@ void PLSRenderContextKDGpuImpl::flush(const FlushDescriptor &desc) {
         .regions = {
             BufferTextureCopyRegion{
                 .bufferOffset = desc.simpleGradDataOffsetInBytes,
+                .textureSubResource =
+                    TextureSubresourceLayers{
+                        .aspectMask = TextureAspectFlagBits::ColorBit,
+                    },
                 .textureExtent =
                     {
                         .width = desc.simpleGradTexelsWidth,
                         .height = desc.simpleGradTexelsHeight,
                         .depth = 1,
-                    }},
+                    },
+            },
         }});
   }
 
@@ -1376,45 +1301,23 @@ void PLSRenderContextKDGpuImpl::flush(const FlushDescriptor &desc) {
     const auto &pathBuffers =
         *static_cast<const BufferKDGpu *>(pathBufferRing());
 
-    auto getPathBufferStorageTextureView = [&]() -> const TextureView & {
-      assert(m_contextOptions.disableStorageBuffers);
-      return static_cast<const StorageTextureBufferKDGpu *>(
-                 std::addressof(pathBuffers))
-          ->textureView();
-    };
-
     auto getPathBufferBinding = [&]() -> BindingResource {
-      if (m_contextOptions.disableStorageBuffers) {
-        return TextureViewBinding{getPathBufferStorageTextureView()};
-      } else {
-        return StorageBufferBinding{
-            .buffer = pathBuffers.submittedBuffer(),
-            .offset =
-                static_cast<uint32_t>(desc.firstPath * sizeof(pls::PathData)),
-        };
-      }
+      return StorageBufferBinding{
+          .buffer = pathBuffers.submittedBuffer(),
+          .offset =
+              static_cast<uint32_t>(desc.firstPath * sizeof(pls::PathData)),
+      };
     };
 
     const auto &contourBuffers =
         *static_cast<const BufferKDGpu *>(contourBufferRing());
 
-    auto getContourBufferStorageTextureView = [&]() -> const TextureView & {
-      assert(m_contextOptions.disableStorageBuffers);
-      return static_cast<const StorageTextureBufferKDGpu *>(
-                 std::addressof(contourBuffers))
-          ->textureView();
-    };
-
     auto getContourBufferBinding = [&]() -> BindingResource {
-      if (m_contextOptions.disableStorageBuffers) {
-        return TextureViewBinding{getContourBufferStorageTextureView()};
-      } else {
-        return StorageBufferBinding{
-            .buffer = pathBuffers.submittedBuffer(),
-            .offset =
-                static_cast<uint32_t>(desc.firstPath * sizeof(pls::PathData)),
-        };
-      }
+      return StorageBufferBinding{
+          .buffer = pathBuffers.submittedBuffer(),
+          .offset =
+              static_cast<uint32_t>(desc.firstPath * sizeof(pls::PathData)),
+      };
     };
 
     m_tesselationBindings = m_device.createBindGroup(BindGroupOptions{
@@ -1526,6 +1429,35 @@ void PLSRenderContextKDGpuImpl::flush(const FlushDescriptor &desc) {
       .height = static_cast<float>(renderTarget->height()),
   });
 
+  if (m_contextOptions.plsType == PixelLocalStorageType::subpassLoad) {
+    m_frameBindings.push_back(m_device.createBindGroup(BindGroupOptions{
+        .layout = m_drawBindGroupLayouts[PLS_TEXTURE_BINDINGS_SET],
+        .resources = {
+            BindGroupEntry{
+                .binding = FRAMEBUFFER_PLANE_IDX,
+                .resource =
+                    TextureViewBinding{renderTarget->m_targetTextureView},
+            },
+            BindGroupEntry{
+                .binding = COVERAGE_PLANE_IDX,
+                .resource =
+                    TextureViewBinding{renderTarget->m_coverageTextureView},
+            },
+            BindGroupEntry{
+                .binding = CLIP_PLANE_IDX,
+                .resource = TextureViewBinding{renderTarget->m_clipTextureView},
+            },
+            BindGroupEntry{
+                .binding = ORIGINAL_DST_COLOR_PLANE_IDX,
+                .resource =
+                    TextureViewBinding{
+                        renderTarget->m_originalDstColorTextureView},
+            },
+        }}));
+
+    drawPass.setBindGroup(PLS_TEXTURE_BINDINGS_SET, m_frameBindings.back());
+  }
+
   const TextureView *currentImageTextureView = &m_nullImagePaintTextureView;
   bool needsNewBindings = true;
   // destroy bindings generated on previous  frame
@@ -1560,85 +1492,91 @@ void PLSRenderContextKDGpuImpl::flush(const FlushDescriptor &desc) {
     }
 
     if (needsNewBindings) {
-      m_frameBindings.push_back(m_device.createBindGroup(BindGroupOptions{
-               .layout = m_drawBindGroupLayouts[0],
-               .resources = {
-                BindGroupEntry{
-                    .binding = TESS_VERTEX_TEXTURE_IDX,
-                    .resource = TextureViewBinding{m_tesselationTextureView},
-                },
-                BindGroupEntry{
-                    .binding = GRAD_TEXTURE_IDX,
-                    .resource = TextureViewBinding{m_gradientTextureView},
-                },
-                BindGroupEntry{
-                    .binding = IMAGE_TEXTURE_IDX,
-                    .resource = TextureViewBinding{*currentImageTextureView},
-                },
-                m_contextOptions.disableStorageBuffers ?
-                    KDGpu::BindGroupEntry{
-                        .binding = PATH_BUFFER_IDX,
-                        .resource = TextureViewBinding{static_cast<const StorageTextureBufferKDGpu*>(pathBufferRing())->textureView() },
-                    } :
-                    KDGpu::BindGroupEntry{
-                        .binding = PATH_BUFFER_IDX,
-                        .resource = StorageBufferBinding{
-                            .buffer = static_cast<const BufferKDGpu*>(pathBufferRing())->submittedBuffer(),
-                            .offset = static_cast<uint32_t>(desc.firstPath * sizeof(pls::PathData)),
-                        },
-                    },
-                m_contextOptions.disableStorageBuffers ?
-                    KDGpu::BindGroupEntry{
-                        .binding = PAINT_BUFFER_IDX,
-                        .resource = TextureViewBinding{static_cast<const StorageTextureBufferKDGpu*>(paintBufferRing())->textureView() },
-                    } :
-                    KDGpu::BindGroupEntry{
-                        .binding = PAINT_BUFFER_IDX,
-                        .resource = StorageBufferBinding{
-                            .buffer = static_cast<const BufferKDGpu*>(paintBufferRing())->submittedBuffer(),
-                            .offset = static_cast<uint32_t>(desc.firstPaint * sizeof(pls::PaintData)),
-                        },
-                    },
-                m_contextOptions.disableStorageBuffers ?
-                    KDGpu::BindGroupEntry{
-                        .binding = PAINT_AUX_BUFFER_IDX,
-                        .resource = TextureViewBinding{static_cast<const StorageTextureBufferKDGpu*>(paintAuxBufferRing())->textureView() },
-                    } :
-                    KDGpu::BindGroupEntry{
-                        .binding = PAINT_AUX_BUFFER_IDX,
-                        .resource = StorageBufferBinding{
-                            .buffer = static_cast<const BufferKDGpu*>(paintAuxBufferRing())->submittedBuffer(),
-                            .offset = static_cast<uint32_t>(desc.firstPaintAux * sizeof(pls::PaintAuxData)),
-                        },
-                    },
-                m_contextOptions.disableStorageBuffers ?
-                    KDGpu::BindGroupEntry{
-                        .binding = CONTOUR_BUFFER_IDX,
-                        .resource = TextureViewBinding{static_cast<const StorageTextureBufferKDGpu*>(contourBufferRing())->textureView() },
-                    } :
-                    KDGpu::BindGroupEntry{
-                        .binding = CONTOUR_BUFFER_IDX,
-                        .resource = StorageBufferBinding{
-                            .buffer = static_cast<const BufferKDGpu*>(contourBufferRing())->submittedBuffer(),
-                            .offset = static_cast<uint32_t>(desc.firstContour * sizeof(pls::ContourData)),
-                        },
-                    },
-                {
-                    .binding = FLUSH_UNIFORM_BUFFER_IDX,
-                    .resource = UniformBufferBinding{
-                        .buffer = static_cast<const BufferKDGpu*>(flushUniformBufferRing())->submittedBuffer(),
-                        .offset = static_cast<uint32_t>(desc.flushUniformDataOffsetInBytes),
-                    },
-                },
-                {
-                    .binding = IMAGE_DRAW_UNIFORM_BUFFER_IDX,
-                    // dynamic, determined by imageDrawDataOffset
-                    .resource = DynamicUniformBufferBinding{
-                        .buffer = static_cast<const BufferKDGpu*>(imageDrawUniformBufferRing())->submittedBuffer(),
-                        .size = sizeof(pls::ImageDrawUniforms),
-                    },
-                },
-        }}));
+      m_frameBindings.push_back(
+          m_device.createBindGroup(BindGroupOptions{
+              .layout = m_drawBindGroupLayouts[0],
+              .resources = {
+                  BindGroupEntry{
+                      .binding = TESS_VERTEX_TEXTURE_IDX,
+                      .resource = TextureViewBinding{m_tesselationTextureView},
+                  },
+                  BindGroupEntry{
+                      .binding = GRAD_TEXTURE_IDX,
+                      .resource = TextureViewBinding{m_gradientTextureView},
+                  },
+                  BindGroupEntry{
+                      .binding = IMAGE_TEXTURE_IDX,
+                      .resource = TextureViewBinding{*currentImageTextureView},
+                  },
+
+                  KDGpu::BindGroupEntry{
+                      .binding = PATH_BUFFER_IDX,
+                      .resource =
+                          StorageBufferBinding{
+                              .buffer = static_cast<const BufferKDGpu *>(
+                                            pathBufferRing())
+                                            ->submittedBuffer(),
+                              .offset = static_cast<uint32_t>(
+                                  desc.firstPath * sizeof(pls::PathData)),
+                          },
+                  },
+                  KDGpu::BindGroupEntry{
+                      .binding = PAINT_BUFFER_IDX,
+                      .resource =
+                          StorageBufferBinding{
+                              .buffer = static_cast<const BufferKDGpu *>(
+                                            paintBufferRing())
+                                            ->submittedBuffer(),
+                              .offset = static_cast<uint32_t>(
+                                  desc.firstPaint * sizeof(pls::PaintData)),
+                          },
+                  },
+                  KDGpu::BindGroupEntry{
+                      .binding = PAINT_AUX_BUFFER_IDX,
+                      .resource =
+                          StorageBufferBinding{
+                              .buffer = static_cast<const BufferKDGpu *>(
+                                            paintAuxBufferRing())
+                                            ->submittedBuffer(),
+                              .offset = static_cast<uint32_t>(
+                                  desc.firstPaintAux *
+                                  sizeof(pls::PaintAuxData)),
+                          },
+                  },
+                  KDGpu::BindGroupEntry{
+                      .binding = CONTOUR_BUFFER_IDX,
+                      .resource =
+                          StorageBufferBinding{
+                              .buffer = static_cast<const BufferKDGpu *>(
+                                            contourBufferRing())
+                                            ->submittedBuffer(),
+                              .offset = static_cast<uint32_t>(
+                                  desc.firstContour * sizeof(pls::ContourData)),
+                          },
+                  },
+                  {
+                      .binding = FLUSH_UNIFORM_BUFFER_IDX,
+                      .resource =
+                          UniformBufferBinding{
+                              .buffer = static_cast<const BufferKDGpu *>(
+                                            flushUniformBufferRing())
+                                            ->submittedBuffer(),
+                              .offset = static_cast<uint32_t>(
+                                  desc.flushUniformDataOffsetInBytes),
+                          },
+                  },
+                  {
+                      .binding = IMAGE_DRAW_UNIFORM_BUFFER_IDX,
+                      // dynamic, determined by imageDrawDataOffset
+                      .resource =
+                          DynamicUniformBufferBinding{
+                              .buffer = static_cast<const BufferKDGpu *>(
+                                            imageDrawUniformBufferRing())
+                                            ->submittedBuffer(),
+                              .size = sizeof(pls::ImageDrawUniforms),
+                          },
+                  },
+              }}));
 
       if (needsNewBindings || drawType == DrawType::imageRect ||
           drawType == DrawType::imageMesh) {

@@ -139,7 +139,9 @@ FiddleContextKDGpu::FiddleContextKDGpu() {
 
   m_plsContext = PLSRenderContextKDGpuImpl::MakeContext(
       std::move(device), std::move(queue),
-      PLSRenderContextKDGpuImpl::ContextOptions{.disableStorageBuffers = false},
+      PLSRenderContextKDGpuImpl::ContextOptions{
+          .plsType = PLSRenderContextKDGpuImpl::PixelLocalStorageType::none,
+      },
       PlatformFeatures{});
 
   Device &contextOwnedDevice =

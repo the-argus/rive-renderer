@@ -5,6 +5,18 @@
 #include <map>
 
 namespace rive::pls {
+namespace PLSOptions {
+enum class PixelLocalStorageType {
+  // Pixel local storage cannot be supported; make a best reasonable effort to
+  // draw shapes.
+  none,
+  subpassLoad,
+};
+
+struct ContextOptions {
+  PixelLocalStorageType plsType = PixelLocalStorageType::none;
+};
+} // namespace PLSOptions
 
 class PLSRenderTargetKDGpu : public PLSRenderTarget {
 public:
@@ -18,7 +30,8 @@ private:
 
   PLSRenderTargetKDGpu(KDGpu::Device &device, KDGpu::Format framebufferFormat,
                        uint32_t width, uint32_t height,
-                       KDGpu::TextureUsageFlags additionalTextureFlags);
+                       KDGpu::TextureUsageFlags additionalTextureFlags,
+                       const PLSOptions::ContextOptions &);
 
   const KDGpu::Format m_framebufferFormat;
 
@@ -34,16 +47,8 @@ private:
 
 class PLSRenderContextKDGpuImpl : public PLSRenderContextHelperImpl {
 public:
-  enum class PixelLocalStorageType {
-    // Pixel local storage cannot be supported; make a best reasonable effort to
-    // draw shapes.
-    none,
-  };
-
-  struct ContextOptions {
-    bool disableStorageBuffers = false;
-    PixelLocalStorageType plsType = PixelLocalStorageType::none;
-  };
+  using PixelLocalStorageType = PLSOptions::PixelLocalStorageType;
+  using ContextOptions = PLSOptions::ContextOptions;
 
   virtual ~PLSRenderContextKDGpuImpl();
 
@@ -138,7 +143,7 @@ private:
 
   class DrawPipeline;
   std::map<uint32_t, DrawPipeline> m_drawPipelines;
-  std::array<KDGpu::BindGroupLayout, 2> m_drawBindGroupLayouts;
+  std::array<KDGpu::BindGroupLayout, 3> m_drawBindGroupLayouts;
   KDGpu::Sampler m_linearSampler;
   KDGpu::Sampler m_mipmapSampler;
   KDGpu::BindGroup m_samplerBindings;
