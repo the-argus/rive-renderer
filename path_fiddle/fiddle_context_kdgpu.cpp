@@ -88,9 +88,6 @@ public:
   float dpiScale(GLFWwindow *) const override;
 
 private:
-  static constexpr KDGpu::Format swapchainFormat =
-      KDGpu::Format::R8G8B8A8_UNORM;
-
   KDGpu::Device &device() {
     return m_plsContext->static_impl_cast<PLSRenderContextKDGpuImpl>()
         ->device();
@@ -113,6 +110,8 @@ private:
   KDGpu::Swapchain m_swapchain;
   std::vector<KDGpu::TextureView> m_swapchainViews;
   uint32_t m_currentImageIndex;
+  // may change depending on formats supported by surface
+  KDGpu::Format m_swapchainFormat = KDGpu::Format::R8G8B8A8_UNORM;
 
   // we synchronously copy pixels from the screen into memory every frame
   std::optional<KDGpu::Buffer> m_pixelReadBuff;
@@ -297,7 +296,7 @@ void FiddleContextKDGpu::onSizeChanged(GLFWwindow *window, int width,
   createSwapchain(width, height);
 
   m_renderTarget = m_plsContext->static_impl_cast<PLSRenderContextKDGpuImpl>()
-                       ->makeRenderTarget(swapchainFormat, width, height);
+                       ->makeRenderTarget(m_swapchainFormat, width, height);
 }
 
 void FiddleContextKDGpu::createSwapchain(int width, int height) {
@@ -312,6 +311,21 @@ void FiddleContextKDGpu::createSwapchain(int width, int height) {
   const SurfaceCapabilities &surfaceCapabilities =
       swapchainProperties.capabilities;
 
+  // correct for missing formats
+  std::array targetFormats = {
+      KDGpu::Format::B8G8R8A8_UNORM,
+      KDGpu::Format::R8G8B8A8_UNORM,
+  };
+
+  for (auto &fmt : swapchainProperties.formats) {
+    const auto b = targetFormats.begin();
+    const auto e = targetFormats.end();
+    if (std::find(b, e, fmt.format) != e) {
+      m_swapchainFormat = fmt.format;
+      break;
+    }
+  }
+
   const Extent2D swapchainExtent = {
       .width =
           std::clamp((uint32_t)width, surfaceCapabilities.minImageExtent.width,
@@ -323,7 +337,7 @@ void FiddleContextKDGpu::createSwapchain(int width, int height) {
 
   const SwapchainOptions swapchainOptions{
       .surface = *m_surface,
-      .format = swapchainFormat,
+      .format = m_swapchainFormat,
       .minImageCount = getSuitableImageCount(swapchainProperties.capabilities),
       .imageExtent =
           {
