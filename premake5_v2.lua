@@ -85,15 +85,6 @@ do
         forceincludes({ 'rive_yoga_renames.h' })
     end
 
-    filter('options:with_kdgpu')
-    do
-        defines({ 'SPDLOG_FMT_EXTERNAL' })
-        cppdialect('C++20')
-        disablewarnings({ 'deprecated' })
-        links({ 'KDGpu', 'KDGui', 'fmt', 'shaderc_shared' })
-        files({'renderer/kdgpu/pls_render_context_kdgpu_impl.cpp'})
-    end
-
     filter({ 'system:macosx', 'options:variant=runtime' })
     do
         buildoptions({

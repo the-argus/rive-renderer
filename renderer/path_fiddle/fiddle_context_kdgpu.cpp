@@ -1,6 +1,6 @@
 #include "fiddle_context.hpp"
 
-#include "rive/pls/kdgpu/pls_render_context_kdgpu_impl.hpp"
+#include "rive/renderer/kdgpu/render_context_kdgpu_impl.hpp"
 #include "rive/pls/pls_renderer.hpp"
 
 #include <KDGpu/buffer_options.h>

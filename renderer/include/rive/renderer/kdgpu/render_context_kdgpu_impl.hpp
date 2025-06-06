@@ -1,6 +1,6 @@
 #pragma once
 
-#include "rive/pls/pls_render_context_helper_impl.hpp"
+#include "rive/renderer/render_context_helper_impl.hpp"
 #include <KDGpu/device.h>
 #include <map>
 

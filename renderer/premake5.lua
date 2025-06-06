@@ -317,6 +317,15 @@ if _OPTIONS['with-webgpu'] or _OPTIONS['with-dawn'] then
             })
         end
 
+        filter('options:with_kdgpu')
+        do
+            defines({ 'SPDLOG_FMT_EXTERNAL' })
+            cppdialect('C++20')
+            disablewarnings({ 'deprecated' })
+            links({ 'KDGpu', 'KDGui', 'fmt', 'shaderc_shared' })
+            files({'renderer/src/kdgpu/render_context_kdgpu_impl.cpp'})
+        end
+
         filter('files:**.html or **.riv or **.js')
         do
             buildmessage('Copying %{file.relpath} to %{cfg.targetdir}')
