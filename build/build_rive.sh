@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 
 # build_rive.sh: build any standard Rive sub-project.
 #
