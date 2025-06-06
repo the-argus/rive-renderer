@@ -1,0 +1,79 @@
+#pragma once
+
+#include "constants.exports.h"
+
+namespace rive {
+namespace pls {
+namespace glsl {
+const char constants[] = R"===(#define q9 float(2048)
+#define k7 11
+#define L5 float(512)
+#define l7 7
+#define m7 0x7fu
+#define n7 (1u<<31u)
+#define r9 (1u<<30u)
+#define Z3 (3u<<28u)
+#define v9 (3u<<28u)
+#define w9 (2u<<28u)
+#define H4 (1u<<27u)
+#define I4 (1u<<26u)
+#define M5 (1u<<25u)
+#define o7 (1u<<24u)
+#define J4 (1u<<23u)
+#define p7 (1u<<22u)
+#define k9 0xffffu
+#define q7 0
+#define r7 1
+#define v7 2
+#define q7 0
+#define r7 1
+#define v7 2
+#define N6 0u
+#define x4 1u
+#define O6 2u
+#define P6 3u
+#define y4 4u
+#define M6 0x100u
+#define a9 0x200u
+#define w5 0
+#define x5 1
+#define y5 2
+#define w7 3
+#define x9 0
+#define q4 1
+#define k3 2
+#define x7 3
+#define H6 4
+#define I6 5
+#define y7 6
+#define O2 7
+#define z7 8
+#define w3 9
+#define A7 10
+#define x3 11
+#define B7 1
+#define K4 2
+#define l9 1023u
+#define U6 0u
+#define K8 1u
+#define L8 2u
+#define M8 3u
+#define N8 4u
+#define O8 5u
+#define P8 6u
+#define Q8 7u
+#define R8 8u
+#define S8 9u
+#define T8 10u
+#define J8 11u
+#define U8 12u
+#define V8 13u
+#define W8 14u
+#define X8 15u
+#define K6 float(512)
+#define L6 float(0.001953125)
+#define P3 float(1<<15)
+)===";
+} // namespace glsl
+} // namespace pls
+} // namespace rive
