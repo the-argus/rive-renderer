@@ -85,7 +85,7 @@ do
         forceincludes({ 'rive_yoga_renames.h' })
     end
 
-    filter('options:with-kdgpu')
+    filter('options:with_kdgpu')
     do
         defines({ 'SPDLOG_FMT_EXTERNAL' })
         cppdialect('C++20')
@@ -121,7 +121,6 @@ do
             os.getenv("RIVE_BUILD_KDGPU_LIBDIR"),
             os.getenv("RIVE_BUILD_KDUTILS_LIBDIR"),
             os.getenv("RIVE_BUILD_FMT_LIBDIR"),
-            RIVE_RUNTIME_DIR .. '/skia/dependencies/glfw_build/src/Release',
         })
         includedirs({
             os.getenv("RIVE_BUILD_GLFW_INCLUDE_PATH"),
@@ -152,6 +151,11 @@ newoption({
 newoption({
     trigger = 'with_rive_text',
     description = 'Compiles in text features.',
+})
+
+newoption({
+    trigger = 'with_kdgpu',
+    description = 'Compile with kdgpu vulkan as an available backend',
 })
 
 newoption({
