@@ -80,7 +80,10 @@ do
             os.getenv("RIVE_BUILD_KDUTILS_INCLUDE_PATH"),
             os.getenv("RIVE_BUILD_FMT_LIBDIR")
         })
-        links({ 'glfw' })
+        -- NOTE: always linking X11-xcb even if we are only compiling wayland
+        -- support
+        -- TODO: conditionally link x11-xcb
+        links({ 'glfw', 'X11-xcb' })
     end
 
     filter('system:macosx')

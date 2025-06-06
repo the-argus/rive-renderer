@@ -17,11 +17,8 @@
 #endif
 
 #if defined(KDGUI_PLATFORM_XCB)
-// TODO: see how to give kdgui xcb resources from x11 resources, if possible
-// NOTE: doing GLFW_EXPOSE_NATIVE_X11 includes xlib headers, which define a
-// macro "Success" which conflicts with AcquireImageResult::Success from KDGpu
-//
-// #define GLFW_EXPOSE_NATIVE_X11
+#define GLFW_EXPOSE_NATIVE_X11
+#include <X11/Xlib-xcb.h>
 #endif
 
 #if defined(KDGUI_PLATFORM_WAYLAND)
@@ -34,6 +31,10 @@
 
 #include <GLFW/glfw3.h>
 #include <GLFW/glfw3native.h>
+// Evil hack: X.h (which is only included when compiling with X support, btw)
+// has a #define Success 0 in it which breaks the KDGpu enums that have an item
+// called Success. Thanks, xlib
+#undef Success
 
 using namespace rive;
 using namespace rive::pls;
@@ -45,17 +46,18 @@ KDGpu::SurfaceOptions getSurfaceOptionsFrom(GLFWwindow *window) {
   surfaceOptions.hWnd = glfwGetWin32Window(window);
   return surfaceOptions;
 #endif
+#if defined(KDGUI_PLATFORM_XCB) || defined(KDGUI_PLATFORM_WAYLAND)
+#if defined(KDGUI_PLATFORM_XCB)
+  surfaceOptions.connection = XGetXCBConnection(glfwGetX11Display());
+  surfaceOptions.window = static_cast<xcb_window_t>(glfwGetX11Window(window));
+#endif
 #if defined(KDGUI_PLATFORM_WAYLAND)
   surfaceOptions.display = glfwGetWaylandDisplay();
   surfaceOptions.surface = glfwGetWaylandWindow(window);
+#endif
   return surfaceOptions;
 #endif
-#if defined(KDGUI_PLATFORM_XCB)
-  // NOTE: both XCB and wayland can be supported simultaneously. later, we
-  // should default to xcb i think since it can also be used via xwayland. but
-  // right now it doesnt work so it's not default
-  RIVE_UNREACHABLE();
-#endif
+
 #if defined(KDGUI_PLATFORM_COCOA)
   // TODO: macos
   RIVE_UNREACHABLE();
