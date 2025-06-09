@@ -1,5 +1,5 @@
 #include "rive/renderer/kdgpu/render_context_kdgpu_impl.hpp"
-#include "rive/pls/pls_image.hpp"
+#include "rive/renderer/rive_renderer.hpp"
 // #include "shaders/out/generated/spirv/color_ramp.frag.h"
 // #include "shaders/out/generated/spirv/color_ramp.vert.h"
 #include <KDGpu/adapter.h>
@@ -15,49 +15,49 @@
 #include <KDGpu/vulkan/vulkan_resource_manager.h>
 #include <shaderc/shaderc.hpp>
 
-#include "shaders/out/generated/spirv/color_ramp.frag.h"
-#include "shaders/out/generated/spirv/color_ramp.vert.h"
-#include "shaders/out/generated/spirv/draw_image_mesh.frag.h"
-#include "shaders/out/generated/spirv/draw_image_mesh.vert.h"
-#include "shaders/out/generated/spirv/draw_interior_triangles.frag.h"
-#include "shaders/out/generated/spirv/draw_interior_triangles.vert.h"
-#include "shaders/out/generated/spirv/draw_path.frag.h"
-#include "shaders/out/generated/spirv/draw_path.vert.h"
-#include "shaders/out/generated/spirv/tessellate.frag.h"
-#include "shaders/out/generated/spirv/tessellate.vert.h"
+#include "generated/shaders/spirv/color_ramp.frag.h"
+#include "generated/shaders/spirv/color_ramp.vert.h"
+#include "generated/shaders/spirv/draw_image_mesh.frag.h"
+#include "generated/shaders/spirv/draw_image_mesh.vert.h"
+#include "generated/shaders/spirv/draw_interior_triangles.frag.h"
+#include "generated/shaders/spirv/draw_interior_triangles.vert.h"
+#include "generated/shaders/spirv/draw_path.frag.h"
+#include "generated/shaders/spirv/draw_path.vert.h"
+#include "generated/shaders/spirv/tessellate.frag.h"
+#include "generated/shaders/spirv/tessellate.vert.h"
 
 // glsl for subpassLoad, where shaders are generated on the fly
+#include "generated/shaders/advanced_blend.glsl.hpp"
+#include "generated/shaders/common.glsl.hpp"
+#include "generated/shaders/constants.glsl.hpp"
+#include "generated/shaders/draw_image_mesh.glsl.hpp"
+#include "generated/shaders/draw_path.glsl.hpp"
+#include "generated/shaders/draw_path_common.glsl.hpp"
+#include "generated/shaders/glsl.glsl.hpp"
 #include "shaders/constants.glsl"
-#include "shaders/out/generated/advanced_blend.glsl.hpp"
-#include "shaders/out/generated/common.glsl.hpp"
-#include "shaders/out/generated/constants.glsl.hpp"
-#include "shaders/out/generated/draw_image_mesh.glsl.hpp"
-#include "shaders/out/generated/draw_path.glsl.hpp"
-#include "shaders/out/generated/draw_path_common.glsl.hpp"
-#include "shaders/out/generated/glsl.glsl.hpp"
 
 #include <sstream>
 
-namespace rive::pls {
+namespace rive::gpu {
 PLSRenderContextKDGpuImpl::~PLSRenderContextKDGpuImpl() {}
 
 // wrapper factory function MakeContext instead of constructor. just calls
 // private constructor
 
-std::unique_ptr<PLSRenderContext> PLSRenderContextKDGpuImpl::MakeContext(
+std::unique_ptr<gpu::RenderContext> PLSRenderContextKDGpuImpl::MakeContext(
     KDGpu::Device &&device, KDGpu::Queue &&queue, const ContextOptions &options,
-    const pls::PlatformFeatures &baselinePlatformFeatures) {
+    const gpu::PlatformFeatures &baselinePlatformFeatures) {
   auto impl = std::unique_ptr<PLSRenderContextKDGpuImpl>(
       new PLSRenderContextKDGpuImpl(std::move(device), std::move(queue),
                                     options, baselinePlatformFeatures));
 
-  return std::make_unique<PLSRenderContext>(std::move(impl));
+  return std::make_unique<gpu::RenderContext>(std::move(impl));
 }
 
 // called by MakeContext
 PLSRenderContextKDGpuImpl::PLSRenderContextKDGpuImpl(
     KDGpu::Device &&device, KDGpu::Queue &&queue, const ContextOptions &options,
-    const pls::PlatformFeatures &baselinePlatformFeatures)
+    const gpu::PlatformFeatures &baselinePlatformFeatures)
     : m_contextOptions(options), m_device(std::move(device)),
       m_queue(std::move(queue)),
       m_colorRampPipeline(std::make_unique<ColorRampPipeline>(m_device)),
@@ -146,23 +146,17 @@ PLSRenderContextKDGpuImpl::PLSRenderContextKDGpuImpl(
       });
 
   if (m_contextOptions.plsType == PixelLocalStorageType::subpassLoad) {
-    static_assert(FRAMEBUFFER_PLANE_IDX == 0);
-    static_assert(COVERAGE_PLANE_IDX == 1);
-    static_assert(CLIP_PLANE_IDX == 2);
-    static_assert(ORIGINAL_DST_COLOR_PLANE_IDX == 3);
+    static_assert(COLOR_PLANE_IDX == 0);
+    static_assert(CLIP_PLANE_IDX == 1);
+    static_assert(SCRATCH_COLOR_PLANE_IDX == 2);
+    static_assert(COVERAGE_PLANE_IDX == 3);
     m_drawBindGroupLayouts[PLS_TEXTURE_BINDINGS_SET] =
         m_device.createBindGroupLayout(BindGroupLayoutOptions{
             .label = "drawbindGroupLayouts[PLS_TEXTURE_BINDINGS_SET]",
             .bindings =
                 {
                     ResourceBindingLayout{
-                        .binding = FRAMEBUFFER_PLANE_IDX,
-                        .count = 1,
-                        .resourceType = ResourceBindingType::InputAttachment,
-                        .shaderStages = ShaderStageFlagBits::FragmentBit,
-                    },
-                    ResourceBindingLayout{
-                        .binding = COVERAGE_PLANE_IDX,
+                        .binding = COLOR_PLANE_IDX,
                         .count = 1,
                         .resourceType = ResourceBindingType::InputAttachment,
                         .shaderStages = ShaderStageFlagBits::FragmentBit,
@@ -174,7 +168,13 @@ PLSRenderContextKDGpuImpl::PLSRenderContextKDGpuImpl(
                         .shaderStages = ShaderStageFlagBits::FragmentBit,
                     },
                     ResourceBindingLayout{
-                        .binding = ORIGINAL_DST_COLOR_PLANE_IDX,
+                        .binding = SCRATCH_COLOR_PLANE_IDX,
+                        .count = 1,
+                        .resourceType = ResourceBindingType::InputAttachment,
+                        .shaderStages = ShaderStageFlagBits::FragmentBit,
+                    },
+                    ResourceBindingLayout{
+                        .binding = COVERAGE_PLANE_IDX,
                         .count = 1,
                         .resourceType = ResourceBindingType::InputAttachment,
                         .shaderStages = ShaderStageFlagBits::FragmentBit,
@@ -260,15 +260,15 @@ PLSRenderContextKDGpuImpl::PLSRenderContextKDGpuImpl(
   });
 
   m_tessSpanIndexBuffer = m_device.createBuffer({
-      .size = sizeof(pls::kTessSpanIndices),
+      .size = sizeof(gpu::kTessSpanIndices),
       .usage = BufferUsageFlagBits::IndexBufferBit,
       .memoryUsage = MemoryUsage::CpuToGpu,
   });
 
   {
     void *bufferData = m_tessSpanIndexBuffer.map();
-    std::memcpy(bufferData, pls::kTessSpanIndices,
-                sizeof(pls::kTessSpanIndices));
+    std::memcpy(bufferData, gpu::kTessSpanIndices,
+                sizeof(gpu::kTessSpanIndices));
     m_tessSpanIndexBuffer.unmap();
   }
 
@@ -340,7 +340,7 @@ public:
 
 protected:
   void *onMap() override {
-    m_submittedBufferIdx = (m_submittedBufferIdx + 1) % pls::kBufferRingSize;
+    m_submittedBufferIdx = (m_submittedBufferIdx + 1) % gpu::kBufferRingSize;
     assert(m_buffers.size() > m_submittedBufferIdx);
     assert(m_buffers[m_submittedBufferIdx].isValid());
     if (flags() & RenderBufferFlags::mappedOnceAtInitialization) {
@@ -366,7 +366,7 @@ protected:
 private:
   KDGpu::Device &m_device;
   KDGpu::Queue &m_queue;
-  std::array<KDGpu::Buffer, pls::kBufferRingSize> m_buffers;
+  std::array<KDGpu::Buffer, gpu::kBufferRingSize> m_buffers;
   int m_submittedBufferIdx = -1;
   std::unique_ptr<uint8_t[]> m_stagingBuffer;
 };
@@ -378,12 +378,12 @@ rcp<RenderBuffer> PLSRenderContextKDGpuImpl::makeRenderBuffer(
 }
 
 // virtual wrapper around kdgpu textures
-class PLSTextureKDGpuImpl : public PLSTexture {
+class TextureKDGpuImpl : public Texture {
 public:
-  PLSTextureKDGpuImpl(KDGpu::Device &device, KDGpu::Queue &queue,
-                      uint32_t width, uint32_t height, uint32_t mipLevelCount,
-                      const uint8_t imageDataRGBA[])
-      : PLSTexture(width, height) {
+  TextureKDGpuImpl(KDGpu::Device &device, KDGpu::Queue &queue, uint32_t width,
+                   uint32_t height, uint32_t mipLevelCount,
+                   const uint8_t imageDataRGBA[])
+      : Texture(width, height) {
     using namespace KDGpu;
     m_texture = device.createTexture(TextureOptions{
         .label = "UNKNOWN_TEXTURE",
@@ -415,23 +415,16 @@ private:
   KDGpu::TextureView m_textureView;
 };
 
-rcp<PLSTexture>
+rcp<Texture>
 PLSRenderContextKDGpuImpl::makeImageTexture(uint32_t width, uint32_t height,
                                             uint32_t mipLevelCount,
                                             const uint8_t imageDataRGBA[]) {
-  return make_rcp<PLSTextureKDGpuImpl>(m_device, m_queue, width, height,
-                                       mipLevelCount, imageDataRGBA);
+  return make_rcp<TextureKDGpuImpl>(m_device, m_queue, width, height,
+                                    mipLevelCount, imageDataRGBA);
 }
 
 class BufferKDGpu : public BufferRing {
 public:
-  static std::unique_ptr<BufferKDGpu> Make(KDGpu::Device &device,
-                                           KDGpu::Queue &queue,
-                                           size_t capacityInBytes,
-                                           KDGpu::BufferUsageFlags usage) {
-    return std::make_unique<BufferKDGpu>(device, queue, capacityInBytes, usage);
-  }
-
   BufferKDGpu(KDGpu::Device &device, KDGpu::Queue &queue,
               size_t capacityInBytes, KDGpu::BufferUsageFlags usage)
       : BufferRing(std::max<size_t>(capacityInBytes, 1)), m_queue(queue) {
@@ -471,13 +464,13 @@ protected:
 
 // GL TextureFormat to use for a texture that polyfills a storage buffer.
 static KDGpu::Format
-storage_texture_format(pls::StorageBufferStructure bufferStructure) {
+storage_texture_format(gpu::StorageBufferStructure bufferStructure) {
   switch (bufferStructure) {
-  case pls::StorageBufferStructure::uint32x4:
+  case gpu::StorageBufferStructure::uint32x4:
     return KDGpu::Format::R32G32B32A32_UINT;
-  case pls::StorageBufferStructure::uint32x2:
+  case gpu::StorageBufferStructure::uint32x2:
     return KDGpu::Format::R32G32_UINT;
-  case pls::StorageBufferStructure::float32x4:
+  case gpu::StorageBufferStructure::float32x4:
     return KDGpu::Format::R32G32B32A32_SFLOAT;
   }
   RIVE_UNREACHABLE();
@@ -495,7 +488,7 @@ PLSRenderContextKDGpuImpl::makeUniformBufferRing(size_t capacityInBytes) {
 }
 
 std::unique_ptr<BufferRing> PLSRenderContextKDGpuImpl::makeStorageBufferRing(
-    size_t capacityInBytes, pls::StorageBufferStructure bufferStructure) {
+    size_t capacityInBytes, gpu::StorageBufferStructure bufferStructure) {
   return std::make_unique<BufferKDGpu>(
       m_device, m_queue, capacityInBytes,
       KDGpu::BufferUsageFlagBits::StorageBufferBit);
@@ -506,14 +499,6 @@ PLSRenderContextKDGpuImpl::makeVertexBufferRing(size_t capacityInBytes) {
   return std::make_unique<BufferKDGpu>(
       m_device, m_queue, capacityInBytes,
       KDGpu::BufferUsageFlagBits::VertexBufferBit);
-}
-
-std::unique_ptr<BufferRing>
-PLSRenderContextKDGpuImpl::makeTextureTransferBufferRing(
-    size_t capacityInBytes) {
-  return std::make_unique<BufferKDGpu>(
-      m_device, m_queue, capacityInBytes,
-      KDGpu::BufferUsageFlagBits::TransferSrcBit);
 }
 
 void PLSRenderContextKDGpuImpl::resizeGradientTexture(uint32_t width,
@@ -566,10 +551,10 @@ KDGpu::RenderPassCommandRecorder PLSRenderContextKDGpuImpl::makePLSRenderPass(
     const PLSRenderTargetKDGpu &renderTarget,
     KDGpu::AttachmentLoadOperation loadOp,
     const KDGpu::ColorClearValue &clearColor) {
-  static_assert(FRAMEBUFFER_PLANE_IDX == 0);
-  static_assert(COVERAGE_PLANE_IDX == 1);
-  static_assert(CLIP_PLANE_IDX == 2);
-  static_assert(ORIGINAL_DST_COLOR_PLANE_IDX == 3);
+  static_assert(COLOR_PLANE_IDX == 0);
+  static_assert(CLIP_PLANE_IDX == 1);
+  static_assert(SCRATCH_COLOR_PLANE_IDX == 2);
+  static_assert(COVERAGE_PLANE_IDX == 3);
   using namespace KDGpu;
 
   return commandRecorder.beginRenderPass(RenderPassCommandRecorderOptions{
@@ -584,13 +569,6 @@ KDGpu::RenderPassCommandRecorder PLSRenderContextKDGpuImpl::makePLSRenderPass(
                   .finalLayout = TextureLayout::PresentSrc,
               },
               ColorAttachment{
-                  // coverage
-                  .view = renderTarget.m_coverageTextureView,
-                  .loadOperation = AttachmentLoadOperation::Clear,
-                  .storeOperation = AttachmentStoreOperation::DontCare,
-                  .clearValue = {},
-              },
-              ColorAttachment{
                   // clip
                   .view = renderTarget.m_clipTextureView,
                   .loadOperation = AttachmentLoadOperation::Clear,
@@ -598,8 +576,15 @@ KDGpu::RenderPassCommandRecorder PLSRenderContextKDGpuImpl::makePLSRenderPass(
                   .clearValue = {},
               },
               ColorAttachment{
-                  // originalDstColor
-                  .view = renderTarget.m_originalDstColorTextureView,
+                  // scratchColor
+                  .view = renderTarget.m_scratchColorTextureView,
+                  .loadOperation = AttachmentLoadOperation::Clear,
+                  .storeOperation = AttachmentStoreOperation::DontCare,
+                  .clearValue = {},
+              },
+              ColorAttachment{
+                  // coverage
+                  .view = renderTarget.m_coverageTextureView,
                   .loadOperation = AttachmentLoadOperation::Clear,
                   .storeOperation = AttachmentStoreOperation::DontCare,
                   .clearValue = {},
@@ -609,7 +594,7 @@ KDGpu::RenderPassCommandRecorder PLSRenderContextKDGpuImpl::makePLSRenderPass(
 }
 
 KDGpu::GraphicsPipeline PLSRenderContextKDGpuImpl::makePLSDrawPipeline(
-    rive::pls::DrawType drawType, KDGpu::Format framebufferFormat,
+    rive::gpu::DrawType drawType, KDGpu::Format framebufferFormat,
     const KDGpu::ShaderModule &vertexShader,
     const KDGpu::ShaderModule &fragmentShader) {
   using namespace KDGpu;
@@ -618,6 +603,7 @@ KDGpu::GraphicsPipeline PLSRenderContextKDGpuImpl::makePLSDrawPipeline(
   bool sbpLoad = m_contextOptions.plsType == PixelLocalStorageType::subpassLoad;
   switch (drawType) {
   case DrawType::midpointFanPatches:
+  case DrawType::midpointFanCenterAAPatches:
   case DrawType::outerCurvePatches: {
     attrs = {
         {
@@ -634,16 +620,17 @@ KDGpu::GraphicsPipeline PLSRenderContextKDGpuImpl::makePLSDrawPipeline(
 
     vertexBufferLayouts = {
         {
-            // .stride = sizeof(pls::PatchVertex),
+            // .stride = sizeof(gpu::PatchVertex),
             // .stride = 8 * sizeof(float),
             .stride = static_cast<uint32_t>(sbpLoad ? 8 * sizeof(float)
-                                                    : sizeof(pls::PatchVertex)),
+                                                    : sizeof(gpu::PatchVertex)),
             .inputRate = VertexRate::Vertex,
         },
     };
     break;
   }
-  case DrawType::interiorTriangulation: {
+  case DrawType::interiorTriangulation:
+  case DrawType::atlasBlit: {
     attrs = {
         {
             .location = 0,
@@ -654,13 +641,13 @@ KDGpu::GraphicsPipeline PLSRenderContextKDGpuImpl::makePLSDrawPipeline(
 
     vertexBufferLayouts = {
         {
-            .stride = sizeof(pls::TriangleVertex),
+            .stride = sizeof(gpu::TriangleVertex),
             .inputRate = VertexRate::Vertex,
         },
     };
     break;
   }
-  case DrawType::imageRect: // 3
+  case DrawType::imageRect:
     if (sbpLoad) {
       attrs = {
           {
@@ -718,16 +705,18 @@ KDGpu::GraphicsPipeline PLSRenderContextKDGpuImpl::makePLSDrawPipeline(
         },
     };
     break;
-  case DrawType::plsAtomicInitialize:
-  case DrawType::plsAtomicResolve:
-  case DrawType::stencilClipReset:
+  case DrawType::atomicInitialize:
+  case DrawType::atomicResolve:
+  case DrawType::msaaStrokes:
+  case DrawType::msaaMidpointFanBorrowedCoverage:
+  case DrawType::msaaMidpointFans:
+  case DrawType::msaaMidpointFanStencilReset:
+  case DrawType::msaaMidpointFanPathsStencil:
+  case DrawType::msaaMidpointFanPathsCover:
+  case DrawType::msaaOuterCubics:
+  case DrawType::msaaStencilClipReset:
     RIVE_UNREACHABLE();
   }
-
-  static_assert(FRAMEBUFFER_PLANE_IDX == 0);
-  static_assert(COVERAGE_PLANE_IDX == 1);
-  static_assert(CLIP_PLANE_IDX == 2);
-  static_assert(ORIGINAL_DST_COLOR_PLANE_IDX == 3);
 
   bool isNotImageDraw = sbpLoad ? (drawType != DrawType::imageRect)
                                 : (drawType != DrawType::imageMesh);
@@ -757,8 +746,8 @@ KDGpu::GraphicsPipeline PLSRenderContextKDGpuImpl::makePLSDrawPipeline(
           {
               {.format = framebufferFormat},
               {.format = Format::R32_UINT},
-              {.format = Format::R32_UINT},
               {.format = framebufferFormat},
+              {.format = Format::R32_UINT},
           },
       .primitive =
           {
@@ -767,12 +756,17 @@ KDGpu::GraphicsPipeline PLSRenderContextKDGpuImpl::makePLSDrawPipeline(
               .frontFace = FrontFace::Clockwise,
           },
   });
+  // for the formats of renderTargets above
+  static_assert(COLOR_PLANE_IDX == 0);
+  static_assert(CLIP_PLANE_IDX == 1);
+  static_assert(SCRATCH_COLOR_PLANE_IDX == 2);
+  static_assert(COVERAGE_PLANE_IDX == 3);
 }
 
 // void PLSRenderContextKDGpuImpl::prepareToMapBuffers()
 
 void PLSRenderTargetKDGpu::setTargetTextureView(
-    KDGpu::Handle<KDGpu::TextureView_t> textureView) {
+    const KDGpu::TextureView &textureView) {
   m_targetTextureView = textureView;
 }
 
@@ -856,7 +850,7 @@ public:
             VertexOptions{
                 .buffers = {{
                     .binding = 0,
-                    .stride = sizeof(pls::GradientSpan),
+                    .stride = sizeof(gpu::GradientSpan),
                     .inputRate = VertexRate::Instance,
                 }},
                 .attributes =
@@ -951,7 +945,7 @@ public:
             VertexOptions{
                 .buffers = {{
                     .binding = 0,
-                    .stride = sizeof(pls::TessVertexSpan),
+                    .stride = sizeof(gpu::TessVertexSpan),
                     .inputRate = VertexRate::Instance,
                 }},
                 .attributes =
@@ -1004,7 +998,7 @@ private:
 class PLSRenderContextKDGpuImpl::DrawPipeline {
 public:
   DrawPipeline(PLSRenderContextKDGpuImpl &context, DrawType drawType,
-               pls::ShaderFeatures shaderFeatures,
+               gpu::ShaderFeatures shaderFeatures,
                const ContextOptions &contextOptions) {
     PixelLocalStorageType plsType = context.m_contextOptions.plsType;
     KDGpu::ShaderModule vertexShader, fragmentShader;
@@ -1025,32 +1019,46 @@ public:
 
       switch (drawType) {
       case DrawType::midpointFanPatches:
+      case DrawType::midpointFanCenterAAPatches:
       case DrawType::outerCurvePatches:
         addDefine(GLSL_ENABLE_INSTANCE_INDEX);
         break;
+      case DrawType::atlasBlit:
+        addDefine(GLSL_ATLAS_BLIT);
+        [[fallthrough]];
       case DrawType::interiorTriangulation:
         addDefine(GLSL_DRAW_INTERIOR_TRIANGLES);
         break;
-      case DrawType::imageRect:
-        RIVE_UNREACHABLE();
       case DrawType::imageMesh:
+        addDefine(GLSL_DRAW_IMAGE);
+        addDefine(GLSL_DRAW_IMAGE_MESH);
         break;
-      case DrawType::plsAtomicInitialize:
-      case DrawType::plsAtomicResolve:
-      case DrawType::stencilClipReset:
+      case DrawType::imageRect:
+      case DrawType::atomicInitialize:
+      case DrawType::atomicResolve:
+      case DrawType::msaaStrokes:
+      case DrawType::msaaMidpointFanBorrowedCoverage:
+      case DrawType::msaaMidpointFans:
+      case DrawType::msaaMidpointFanStencilReset:
+      case DrawType::msaaMidpointFanPathsStencil:
+      case DrawType::msaaMidpointFanPathsCover:
+      case DrawType::msaaOuterCubics:
+      case DrawType::msaaStencilClipReset:
+        RIVE_UNREACHABLE();
+        break;
         RIVE_UNREACHABLE();
       }
-      for (size_t i = 0; i < pls::kShaderFeatureCount; ++i) {
+      for (size_t i = 0; i < gpu::kShaderFeatureCount; ++i) {
         ShaderFeatures feature = static_cast<ShaderFeatures>(1 << i);
         if (shaderFeatures & feature) {
           addDefine(GetShaderFeatureGLSLName(feature));
         }
       }
-      glsl << pls::glsl::glsl << '\n';
-      glsl << pls::glsl::constants << '\n';
-      glsl << pls::glsl::common << '\n';
+      glsl << gpu::glsl::glsl << '\n';
+      glsl << gpu::glsl::constants << '\n';
+      glsl << gpu::glsl::common << '\n';
       if (shaderFeatures & ShaderFeatures::ENABLE_ADVANCED_BLEND) {
-        glsl << pls::glsl::advanced_blend << '\n';
+        glsl << gpu::glsl::advanced_blend << '\n';
       }
       if (context.platformFeatures().avoidFlatVaryings) {
         addDefine(GLSL_OPTIONALLY_FLAT);
@@ -1059,35 +1067,36 @@ public:
       }
       switch (drawType) {
       case DrawType::midpointFanPatches:
+      case DrawType::midpointFanCenterAAPatches:
       case DrawType::outerCurvePatches:
         addDefine(GLSL_DRAW_PATH);
-        glsl << pls::glsl::draw_path_common << '\n';
-        glsl << pls::glsl::draw_path << '\n';
+        glsl << gpu::glsl::draw_path_common << '\n';
+        glsl << gpu::glsl::draw_path << '\n';
         break;
       case DrawType::interiorTriangulation:
+      case DrawType::atlasBlit:
         addDefine(GLSL_DRAW_INTERIOR_TRIANGLES);
-        glsl << pls::glsl::draw_path_common << '\n';
-        glsl << pls::glsl::draw_path << '\n';
+        glsl << gpu::glsl::draw_path_common << '\n';
+        glsl << gpu::glsl::draw_path << '\n';
+        break;
+      case DrawType::imageMesh:
+        // addDefine(GLSL_DRAW_IMAGE);
+        // addDefine(GLSL_DRAW_IMAGE_MESH);
+        glsl << gpu::glsl::draw_image_mesh << '\n';
         break;
       case DrawType::imageRect:
-        addDefine(GLSL_DRAW_IMAGE);
-        addDefine(GLSL_DRAW_IMAGE_RECT);
+      case DrawType::atomicInitialize:
+      case DrawType::atomicResolve:
+      case DrawType::msaaStrokes:
+      case DrawType::msaaMidpointFanBorrowedCoverage:
+      case DrawType::msaaMidpointFans:
+      case DrawType::msaaMidpointFanStencilReset:
+      case DrawType::msaaMidpointFanPathsStencil:
+      case DrawType::msaaMidpointFanPathsCover:
+      case DrawType::msaaOuterCubics:
+      case DrawType::msaaStencilClipReset:
         RIVE_UNREACHABLE();
-      case DrawType::imageMesh:
-        addDefine(GLSL_DRAW_IMAGE);
-        addDefine(GLSL_DRAW_IMAGE_MESH);
-        glsl << pls::glsl::draw_image_mesh << '\n';
         break;
-      case DrawType::plsAtomicInitialize:
-        addDefine(GLSL_DRAW_RENDER_TARGET_UPDATE_BOUNDS);
-        addDefine(GLSL_INITIALIZE_PLS);
-        RIVE_UNREACHABLE();
-      case DrawType::plsAtomicResolve:
-        addDefine(GLSL_DRAW_RENDER_TARGET_UPDATE_BOUNDS);
-        addDefine(GLSL_RESOLVE_PLS);
-        RIVE_UNREACHABLE();
-      case DrawType::stencilClipReset:
-        RIVE_UNREACHABLE();
       }
 
       std::ostringstream vertexGLSL;
@@ -1254,7 +1263,7 @@ void PLSRenderContextKDGpuImpl::flush(const FlushDescriptor &desc) {
     gradPass.setViewport(Viewport{
         .x = 0.f,
         .y = static_cast<float>(desc.complexGradRowsTop),
-        .width = static_cast<float>(pls::kGradTextureWidth),
+        .width = static_cast<float>(gpu::kGradTextureWidth),
         .height = static_cast<float>(desc.complexGradRowsTop),
     });
 
@@ -1305,7 +1314,7 @@ void PLSRenderContextKDGpuImpl::flush(const FlushDescriptor &desc) {
       return StorageBufferBinding{
           .buffer = pathBuffers.submittedBuffer(),
           .offset =
-              static_cast<uint32_t>(desc.firstPath * sizeof(pls::PathData)),
+              static_cast<uint32_t>(desc.firstPath * sizeof(gpu::PathData)),
       };
     };
 
@@ -1316,7 +1325,7 @@ void PLSRenderContextKDGpuImpl::flush(const FlushDescriptor &desc) {
       return StorageBufferBinding{
           .buffer = pathBuffers.submittedBuffer(),
           .offset =
-              static_cast<uint32_t>(desc.firstPath * sizeof(pls::PathData)),
+              static_cast<uint32_t>(desc.firstPath * sizeof(gpu::PathData)),
       };
     };
 
@@ -1363,7 +1372,7 @@ void PLSRenderContextKDGpuImpl::flush(const FlushDescriptor &desc) {
     tessPass.setViewport(Viewport{
         .x = 0.f,
         .y = 0.f,
-        .width = pls::kTessTextureWidth,
+        .width = gpu::kTessTextureWidth,
         .height = static_cast<float>(desc.tessDataHeight),
     });
     tessPass.setPipeline(m_tessellatePipeline->renderPipeline());
@@ -1373,7 +1382,7 @@ void PLSRenderContextKDGpuImpl::flush(const FlushDescriptor &desc) {
     tessPass.setIndexBuffer(m_tessSpanIndexBuffer, 0, IndexType::Uint16);
     tessPass.setBindGroup(0, m_tesselationBindings);
     tessPass.drawIndexed(DrawIndexedCommand{
-        .indexCount = std::size(pls::kTessSpanIndices),
+        .indexCount = std::size(gpu::kTessSpanIndices),
         .instanceCount = static_cast<uint32_t>(desc.tessVertexSpanCount),
         .firstIndex = 0,
         .vertexOffset = 0,
@@ -1473,9 +1482,9 @@ void PLSRenderContextKDGpuImpl::flush(const FlushDescriptor &desc) {
     const DrawPipeline &drawPipeline =
         m_drawPipelines
             .try_emplace(
-                pls::ShaderUniqueKey(drawType, batch.shaderFeatures,
-                                     pls::InterlockMode::rasterOrdering,
-                                     pls::ShaderMiscFlags::none),
+                gpu::ShaderUniqueKey(drawType, batch.shaderFeatures,
+                                     gpu::InterlockMode::rasterOrdering,
+                                     gpu::ShaderMiscFlags::none),
                 *this, drawType, batch.shaderFeatures, m_contextOptions)
             .first->second;
     drawPass.setPipeline(
@@ -1486,7 +1495,7 @@ void PLSRenderContextKDGpuImpl::flush(const FlushDescriptor &desc) {
 
     // Bind the appropriate image texture, if any.
     if (auto *imageTexture =
-            static_cast<const PLSTextureKDGpuImpl *>(batch.imageTexture)) {
+            static_cast<const TextureKDGpuImpl *>(batch.imageTexture)) {
       currentImageTextureView = &imageTexture->textureView();
       needsNewBindings = true;
     }
@@ -1517,7 +1526,7 @@ void PLSRenderContextKDGpuImpl::flush(const FlushDescriptor &desc) {
                                             pathBufferRing())
                                             ->submittedBuffer(),
                               .offset = static_cast<uint32_t>(
-                                  desc.firstPath * sizeof(pls::PathData)),
+                                  desc.firstPath * sizeof(gpu::PathData)),
                           },
                   },
                   KDGpu::BindGroupEntry{
@@ -1528,7 +1537,7 @@ void PLSRenderContextKDGpuImpl::flush(const FlushDescriptor &desc) {
                                             paintBufferRing())
                                             ->submittedBuffer(),
                               .offset = static_cast<uint32_t>(
-                                  desc.firstPaint * sizeof(pls::PaintData)),
+                                  desc.firstPaint * sizeof(gpu::PaintData)),
                           },
                   },
                   KDGpu::BindGroupEntry{
@@ -1540,7 +1549,7 @@ void PLSRenderContextKDGpuImpl::flush(const FlushDescriptor &desc) {
                                             ->submittedBuffer(),
                               .offset = static_cast<uint32_t>(
                                   desc.firstPaintAux *
-                                  sizeof(pls::PaintAuxData)),
+                                  sizeof(gpu::PaintAuxData)),
                           },
                   },
                   KDGpu::BindGroupEntry{
@@ -1551,7 +1560,7 @@ void PLSRenderContextKDGpuImpl::flush(const FlushDescriptor &desc) {
                                             contourBufferRing())
                                             ->submittedBuffer(),
                               .offset = static_cast<uint32_t>(
-                                  desc.firstContour * sizeof(pls::ContourData)),
+                                  desc.firstContour * sizeof(gpu::ContourData)),
                           },
                   },
                   {
@@ -1573,7 +1582,7 @@ void PLSRenderContextKDGpuImpl::flush(const FlushDescriptor &desc) {
                               .buffer = static_cast<const BufferKDGpu *>(
                                             imageDrawUniformBufferRing())
                                             ->submittedBuffer(),
-                              .size = sizeof(pls::ImageDrawUniforms),
+                              .size = sizeof(gpu::ImageDrawUniforms),
                           },
                   },
               }}));
@@ -1592,9 +1601,9 @@ void PLSRenderContextKDGpuImpl::flush(const FlushDescriptor &desc) {
         drawPass.setVertexBuffer(0, m_patchVertexBuffer);
         drawPass.setIndexBuffer(m_patchIndexBuffer, 0, IndexType::Uint16);
         drawPass.drawIndexed(DrawIndexedCommand{
-            .indexCount = pls::PatchIndexCount(drawType),
+            .indexCount = gpu::PatchIndexCount(drawType),
             .instanceCount = batch.elementCount,
-            .firstIndex = static_cast<uint32_t>(pls::PatchBaseIndex(drawType)),
+            .firstIndex = static_cast<uint32_t>(gpu::PatchBaseIndex(drawType)),
             // NOTE: is vertexOffset here the same as baseVertex in webgpu?
             .vertexOffset = 0,
             .firstInstance = batch.baseElement,
@@ -1652,4 +1661,4 @@ void PLSRenderContextKDGpuImpl::flush(const FlushDescriptor &desc) {
       .signalFence = m_frameInFlightFence,
   });
 }
-} // namespace rive::pls
+} // namespace rive::gpu

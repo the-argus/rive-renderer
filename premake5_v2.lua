@@ -65,7 +65,7 @@ do
 
     filter({ 'options:for_unreal' })
     do
-        cppdialect('C++17')
+        cppdialect('C++20')
         defines({ '_DISABLE_CONSTEXPR_MUTEX_CONSTRUCTOR' })
     end
 

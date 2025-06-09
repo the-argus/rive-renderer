@@ -215,6 +215,15 @@ do
         })
     end
 
+    filter('options:with_kdgpu')
+    do
+        defines({ 'SPDLOG_FMT_EXTERNAL' })
+        cppdialect('C++20')
+        disablewarnings({ 'deprecated' })
+        links({ 'KDGpu', 'KDGui', 'fmt', 'shaderc_shared' })
+        files({ 'src/kdgpu/render_context_kdgpu_impl.cpp' })
+    end
+
     filter({ 'system:windows or macosx or linux' })
     do
         files({

@@ -4,7 +4,7 @@
 #include <KDGpu/device.h>
 #include <map>
 
-namespace rive::pls {
+namespace rive::gpu {
 namespace PLSOptions {
 enum class PixelLocalStorageType {
   // Pixel local storage cannot be supported; make a best reasonable effort to
@@ -18,11 +18,11 @@ struct ContextOptions {
 };
 } // namespace PLSOptions
 
-class PLSRenderTargetKDGpu : public PLSRenderTarget {
+class PLSRenderTargetKDGpu : public RenderTarget {
 public:
   KDGpu::Format framebufferFormat() const { return m_framebufferFormat; }
 
-  void setTargetTextureView(KDGpu::Handle<KDGpu::TextureView_t>);
+  void setTargetTextureView(const KDGpu::TextureView&);
 
 private:
   friend class PLSRenderContextKDGpuImpl;
@@ -37,15 +37,15 @@ private:
 
   KDGpu::Texture m_coverageTexture;
   KDGpu::Texture m_clipTexture;
-  KDGpu::Texture m_originalDstColorTexture;
+  KDGpu::Texture m_scratchColorTexture;
 
-  KDGpu::Handle<KDGpu::TextureView_t> m_targetTextureView;
+  KDGpu::Handle<KDGpu::TextureView_t> m_targetTextureView; // weak reference
   KDGpu::TextureView m_coverageTextureView;
   KDGpu::TextureView m_clipTextureView;
-  KDGpu::TextureView m_originalDstColorTextureView;
+  KDGpu::TextureView m_scratchColorTextureView;
 };
 
-class PLSRenderContextKDGpuImpl : public PLSRenderContextHelperImpl {
+class PLSRenderContextKDGpuImpl : public RenderContextHelperImpl {
 public:
   using PixelLocalStorageType = PLSOptions::PixelLocalStorageType;
   using ContextOptions = PLSOptions::ContextOptions;
@@ -56,16 +56,16 @@ public:
   virtual rcp<PLSRenderTargetKDGpu>
   makeRenderTarget(KDGpu::Format, uint32_t width, uint32_t height);
 
-  static std::unique_ptr<PLSRenderContext>
+  static std::unique_ptr<gpu::RenderContext>
   MakeContext(KDGpu::Device &&, KDGpu::Queue &&, const ContextOptions &,
-              const pls::PlatformFeatures &baselinePlatformFeatures = {});
+              const gpu::PlatformFeatures &baselinePlatformFeatures = {});
 
   rcp<RenderBuffer> makeRenderBuffer(RenderBufferType, RenderBufferFlags,
                                      size_t) override;
 
-  rcp<PLSTexture> makeImageTexture(uint32_t width, uint32_t height,
+  rcp<Texture> makeImageTexture(uint32_t width, uint32_t height,
                                    uint32_t mipLevelCount,
-                                   const uint8_t imageDataRGBA[]) override;
+                                   const uint8_t imageDataRGBAPremul[]) override;
 
   KDGpu::Device &device() { return m_device; }
   const KDGpu::Device &device() const { return m_device; }
@@ -85,11 +85,11 @@ public:
 protected:
   PLSRenderContextKDGpuImpl(
       KDGpu::Device &&, KDGpu::Queue &&, const ContextOptions &,
-      const pls::PlatformFeatures &baselinePlatformFeatures);
+      const gpu::PlatformFeatures &baselinePlatformFeatures);
 
   // Create a standard PLS "draw" pipeline for the current implementation.
   virtual KDGpu::GraphicsPipeline
-  makePLSDrawPipeline(rive::pls::DrawType drawType,
+  makePLSDrawPipeline(gpu::DrawType drawType,
                       KDGpu::Format framebufferFormat,
                       const KDGpu::ShaderModule &vertexShader,
                       const KDGpu::ShaderModule &fragmentShader);
@@ -110,18 +110,14 @@ private:
   makeUniformBufferRing(size_t capacityInBytes) override;
   std::unique_ptr<BufferRing>
   makeStorageBufferRing(size_t capacityInBytes,
-                        pls::StorageBufferStructure) override;
+                        gpu::StorageBufferStructure) override;
   std::unique_ptr<BufferRing>
   makeVertexBufferRing(size_t capacityInBytes) override;
-  std::unique_ptr<BufferRing>
-  makeTextureTransferBufferRing(size_t capacityInBytes) override;
 
   void resizeGradientTexture(uint32_t width, uint32_t height) override;
   void resizeTessellationTexture(uint32_t width, uint32_t height) override;
 
-  void prepareToMapBuffers() override {}
-
-  void flush(const FlushDescriptor &) override;
+  void flush(const gpu::FlushDescriptor &) override;
 
   ContextOptions m_contextOptions;
 

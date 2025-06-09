@@ -31,7 +31,23 @@ if not _OPTIONS['with-webgpu'] then
 
         defines({ 'YOGA_EXPORT=' })
 
-        files({ 'path_fiddle/**.cpp', 'shader_hotload/**.cpp' })
+        files({
+            'path_fiddle/fiddle_context_d3d.cpp',
+            'path_fiddle/fiddle_context_d3d12.cpp',
+            'path_fiddle/fiddle_context_dawn.cpp',
+            'path_fiddle/fiddle_context_gl.cpp',
+            'path_fiddle/fiddle_context_vulkan.cpp',
+            'path_fiddle/path_fiddle.cpp',
+            'shader_hotload/**.cpp'
+        })
+
+        filter('options:with_kdgpu')
+        do
+            files({ 'path_fiddle/fiddle_context_kdgpu.cpp' })
+            defines({ 'SPDLOG_FMT_EXTERNAL' })
+            disablewarnings({ 'deprecated' })
+            links({ 'KDGpu', 'KDGui', 'fmt', 'shaderc_shared' })
+        end
 
         links({
             'rive',
@@ -315,15 +331,6 @@ if _OPTIONS['with-webgpu'] or _OPTIONS['with-dawn'] then
             links({
                 'rive_yoga',
             })
-        end
-
-        filter('options:with_kdgpu')
-        do
-            defines({ 'SPDLOG_FMT_EXTERNAL' })
-            cppdialect('C++20')
-            disablewarnings({ 'deprecated' })
-            links({ 'KDGpu', 'KDGui', 'fmt', 'shaderc_shared' })
-            files({'renderer/src/kdgpu/render_context_kdgpu_impl.cpp'})
         end
 
         filter('files:**.html or **.riv or **.js')
