@@ -37,7 +37,7 @@
 #undef Success
 
 using namespace rive;
-using namespace rive::pls;
+using namespace rive::gpu;
 
 KDGpu::SurfaceOptions getSurfaceOptionsFrom(GLFWwindow *window) {
   using namespace KDGpu;
@@ -69,7 +69,7 @@ class FiddleContextKDGpu : public FiddleContext {
 public:
   FiddleContextKDGpu();
 
-  void begin(const PLSRenderContext::FrameDescriptor &frameDescriptor) override;
+  void begin(const RenderContext::FrameDescriptor &frameDescriptor) override;
 
   void end(GLFWwindow *window, std::vector<uint8_t> *pixelData) final;
 
@@ -82,8 +82,8 @@ public:
   void onSizeChanged(GLFWwindow *window, int width, int height,
                      uint32_t sampleCount) override;
 
-  rive::pls::PLSRenderTarget *plsRenderTargetOrNull() override;
-  rive::pls::PLSRenderContext *plsContextOrNull() override;
+  RenderTarget *renderTargetOrNull() override;
+  RenderContext *renderContextOrNull() override;
   rive::Factory *factory() override;
   float dpiScale(GLFWwindow *) const override;
 
@@ -102,7 +102,7 @@ private:
   KDGpu::Adapter *m_adapter;
 
   // pipeline and rendering resources
-  std::unique_ptr<PLSRenderContext> m_plsContext;
+  std::unique_ptr<RenderContext> m_plsContext;
   rcp<PLSRenderTargetKDGpu> m_renderTarget;
 
   // swapchain
@@ -162,7 +162,7 @@ float FiddleContextKDGpu::dpiScale(GLFWwindow *) const {
 }
 
 void FiddleContextKDGpu::begin(
-    const PLSRenderContext::FrameDescriptor &frameDescriptor) {
+    const RenderContext::FrameDescriptor &frameDescriptor) {
   using namespace KDGpu;
   // find the texture view we can set as the render target for this frame
   m_currentImageIndex = 0;
@@ -284,7 +284,7 @@ void FiddleContextKDGpu::flushPLSContext() {
 rive::Factory *FiddleContextKDGpu::factory() { return m_plsContext.get(); }
 
 std::unique_ptr<Renderer> FiddleContextKDGpu::makeRenderer(int, int) {
-  return std::make_unique<PLSRenderer>(m_plsContext.get());
+  return std::make_unique<RiveRenderer>(m_plsContext.get());
 }
 
 void FiddleContextKDGpu::onSizeChanged(GLFWwindow *window, int width,
@@ -361,14 +361,15 @@ void FiddleContextKDGpu::createSwapchain(int width, int height) {
   }
 }
 
-rive::pls::PLSRenderTarget *FiddleContextKDGpu::plsRenderTargetOrNull() {
+RenderTarget *FiddleContextKDGpu::renderTargetOrNull() {
   return m_renderTarget.get();
 }
 
-rive::pls::PLSRenderContext *FiddleContextKDGpu::plsContextOrNull() {
+RenderContext *FiddleContextKDGpu::renderContextOrNull() {
   return m_plsContext.get();
 }
 
-std::unique_ptr<FiddleContext> FiddleContext::MakeKDGpu() {
+std::unique_ptr<FiddleContext>
+FiddleContext::MakeKDGpu(FiddleContextOptions options) {
   return std::make_unique<FiddleContextKDGpu>();
 }

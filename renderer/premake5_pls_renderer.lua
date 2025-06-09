@@ -128,7 +128,7 @@ if _TARGET_OS == 'windows' then
     makecommand = makecommand .. ' d3d'
 end
 
-if _OPTIONS['with_vulkan'] or _OPTIONS['with-dawn'] or _OPTIONS['with-webgpu'] then
+if _OPTIONS['with_kdgpu'] or _OPTIONS['with_vulkan'] or _OPTIONS['with-dawn'] or _OPTIONS['with-webgpu'] then
     makecommand = makecommand .. ' spirv'
 end
 

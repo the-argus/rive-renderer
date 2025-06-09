@@ -49,7 +49,7 @@ public:
 
     static std::unique_ptr<FiddleContext> MakeGLPLS(FiddleContextOptions = {});
     static std::unique_ptr<FiddleContext> MakeGLSkia();
-    static std::unique_ptr<FiddleContext> MakeKDGpu();
+    static std::unique_ptr<FiddleContext> MakeKDGpu(FiddleContextOptions = {});
 #ifdef RIVE_MACOSX
     static std::unique_ptr<FiddleContext> MakeMetalPLS(
         FiddleContextOptions = {});

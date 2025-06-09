@@ -45,6 +45,7 @@ if not _OPTIONS['with-webgpu'] then
         do
             files({ 'path_fiddle/fiddle_context_kdgpu.cpp' })
             defines({ 'SPDLOG_FMT_EXTERNAL' })
+            cppdialect('C++20')
             disablewarnings({ 'deprecated' })
             links({ 'KDGpu', 'KDGui', 'fmt', 'shaderc_shared' })
         end

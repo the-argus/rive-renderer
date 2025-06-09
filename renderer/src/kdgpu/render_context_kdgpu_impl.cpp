@@ -1,7 +1,8 @@
 #include "rive/renderer/kdgpu/render_context_kdgpu_impl.hpp"
+#include "generated/shaders/spirv/draw_atlas_blit.frag.h"
+#include "generated/shaders/spirv/draw_atlas_blit.vert.h"
 #include "rive/renderer/rive_renderer.hpp"
-// #include "shaders/out/generated/spirv/color_ramp.frag.h"
-// #include "shaders/out/generated/spirv/color_ramp.vert.h"
+
 #include <KDGpu/adapter.h>
 #include <KDGpu/bind_group_layout_options.h>
 #include <KDGpu/bind_group_options.h>
@@ -184,9 +185,9 @@ PLSRenderContextKDGpuImpl::PLSRenderContextKDGpuImpl(
   };
 
   // describe the size and number of resources for samplers in frag shader
-  m_drawBindGroupLayouts[SAMPLER_BINDINGS_SET] =
+  m_drawBindGroupLayouts[IMMUTABLE_SAMPLER_BINDINGS_SET] =
       m_device.createBindGroupLayout(BindGroupLayoutOptions{
-          .label = "drawbindGroupLayouts[SAMPLER_BINDINGS_SET]",
+          .label = "drawbindGroupLayouts[IMMUTABLE_SAMPLER_BINDINGS_SET]",
           .bindings =
               {
                   {
@@ -229,7 +230,7 @@ PLSRenderContextKDGpuImpl::PLSRenderContextKDGpuImpl(
   // the actual sampler handles which the bind group will keep reference of.
   m_samplerBindings = m_device.createBindGroup(BindGroupOptions{
       .label = "samplerBindings",
-      .layout = m_drawBindGroupLayouts[SAMPLER_BINDINGS_SET],
+      .layout = m_drawBindGroupLayouts[IMMUTABLE_SAMPLER_BINDINGS_SET],
       .resources =
           {
               KDGpu::BindGroupEntry{
@@ -315,7 +316,8 @@ public:
 
     const bool mappedOnceAtInitialization =
         flags() & RenderBufferFlags::mappedOnceAtInitialization;
-    const int bufferCount = mappedOnceAtInitialization ? 1 : m_buffers.size();
+    const size_t bufferCount =
+        mappedOnceAtInitialization ? 1 : m_buffers.size();
     KDGpu::BufferOptions desc = {
         // vestigal from webgpu needing multiple of four, dont think this is bad
         // practice though
@@ -329,7 +331,7 @@ public:
       // TODO: originally CopyDst in webgpu, am guessing
       desc.usage |= KDGpu::BufferUsageFlagBits::TransferSrcBit;
     }
-    for (int i = 0; i < bufferCount; ++i) {
+    for (size_t i = 0; i < bufferCount; ++i) {
       m_buffers[i] = m_device.createBuffer(desc);
     }
   }
@@ -1119,6 +1121,7 @@ public:
     } else {
       switch (drawType) {
       case DrawType::midpointFanPatches:
+      case DrawType::midpointFanCenterAAPatches:
       case DrawType::outerCurvePatches:
         vertexShader = context.device().createShaderModule(
             charBufferToCode(draw_path_vert, sizeof(draw_path_vert)));
@@ -1133,17 +1136,29 @@ public:
             charBufferToCode(draw_interior_triangles_frag,
                              sizeof(draw_interior_triangles_frag)));
         break;
-      case DrawType::imageRect:
-        RIVE_UNREACHABLE();
+      case DrawType::atlasBlit:
+        vertexShader = context.device().createShaderModule(charBufferToCode(
+            draw_atlas_blit_vert, sizeof(draw_atlas_blit_vert)));
+        fragmentShader = context.device().createShaderModule(charBufferToCode(
+            draw_atlas_blit_frag, sizeof(draw_atlas_blit_frag)));
+        break;
       case DrawType::imageMesh:
         vertexShader = context.device().createShaderModule(charBufferToCode(
             draw_image_mesh_vert, sizeof(draw_image_mesh_vert)));
         fragmentShader = context.device().createShaderModule(charBufferToCode(
             draw_image_mesh_frag, sizeof(draw_image_mesh_frag)));
         break;
-      case DrawType::plsAtomicInitialize:
-      case DrawType::plsAtomicResolve:
-      case DrawType::stencilClipReset:
+      case DrawType::imageRect:
+      case DrawType::atomicInitialize:
+      case DrawType::atomicResolve:
+      case DrawType::msaaStrokes:
+      case DrawType::msaaMidpointFanBorrowedCoverage:
+      case DrawType::msaaMidpointFans:
+      case DrawType::msaaMidpointFanStencilReset:
+      case DrawType::msaaMidpointFanPathsStencil:
+      case DrawType::msaaMidpointFanPathsCover:
+      case DrawType::msaaOuterCubics:
+      case DrawType::msaaStencilClipReset:
         RIVE_UNREACHABLE();
       }
     }
@@ -1176,7 +1191,7 @@ PLSRenderTargetKDGpu::PLSRenderTargetKDGpu(
     KDGpu::Device &device, KDGpu::Format framebufferFormat, uint32_t width,
     uint32_t height, KDGpu::TextureUsageFlags additionalTextureFlags,
     const PLSOptions::ContextOptions &options)
-    : PLSRenderTarget(width, height), m_framebufferFormat(framebufferFormat) {
+    : RenderTarget(width, height), m_framebufferFormat(framebufferFormat) {
   using namespace KDGpu;
   KDGpu::TextureOptions desc{
       .type = TextureType::TextureType2D,
@@ -1200,15 +1215,15 @@ PLSRenderTargetKDGpu::PLSRenderTargetKDGpu(
   m_clipTexture = device.createTexture(desc);
 
   desc.format = m_framebufferFormat;
-  desc.label = "originalDstColorTexture";
-  m_originalDstColorTexture = device.createTexture(desc);
+  desc.label = "scratchColorTexture";
+  m_scratchColorTexture = device.createTexture(desc);
 
   m_targetTextureView = {};
   m_coverageTextureView =
       m_coverageTexture.createView({.label = "coverageTextureView"});
   m_clipTextureView = m_clipTexture.createView({.label = "clipTextureView"});
-  m_originalDstColorTextureView = m_originalDstColorTexture.createView(
-      {.label = "originalDstColorTextureView"});
+  m_scratchColorTextureView =
+      m_scratchColorTexture.createView({.label = "scratchColorTextureView"});
 }
 
 rcp<PLSRenderTargetKDGpu>
@@ -1226,7 +1241,7 @@ void PLSRenderContextKDGpuImpl::flush(const FlushDescriptor &desc) {
   CommandRecorder commandRecorder = m_device.createCommandRecorder();
 
   // Render the complex color ramps to the gradient texture.
-  if (desc.complexGradSpanCount > 0) {
+  if (desc.gradSpanCount > 0) {
     const auto &uniformBuffers =
         *static_cast<const BufferKDGpu *>(flushUniformBufferRing());
 
@@ -1262,9 +1277,9 @@ void PLSRenderContextKDGpuImpl::flush(const FlushDescriptor &desc) {
 
     gradPass.setViewport(Viewport{
         .x = 0.f,
-        .y = static_cast<float>(desc.complexGradRowsTop),
+        .y = static_cast<float>(desc.gradDataHeight),
         .width = static_cast<float>(gpu::kGradTextureWidth),
-        .height = static_cast<float>(desc.complexGradRowsTop),
+        .height = static_cast<float>(desc.gradDataHeight),
     });
 
     gradPass.setPipeline(m_colorRampPipeline->renderPipeline());
@@ -1272,38 +1287,38 @@ void PLSRenderContextKDGpuImpl::flush(const FlushDescriptor &desc) {
     gradPass.setBindGroup(0, m_gradientBindings);
     gradPass.draw(DrawCommand{
         .vertexCount = 4,
-        .instanceCount = static_cast<uint32_t>(desc.complexGradSpanCount),
+        .instanceCount = static_cast<uint32_t>(desc.gradSpanCount),
         .firstVertex = 0,
-        .firstInstance = static_cast<uint32_t>(desc.firstComplexGradSpan),
+        .firstInstance = static_cast<uint32_t>(desc.firstGradSpan),
     });
     gradPass.end();
   }
 
   // copy the simple color ramps to the gradient texture
-  if (desc.simpleGradTexelsHeight > 0) {
-    const auto &simpleColorRampsBuffers =
-        *static_cast<const BufferKDGpu *>(simpleColorRampsBufferRing());
+  // if (desc.gradDataHeight > 0) {
+  //   const auto &simpleColorRampsBuffers =
+  //       *static_cast<const BufferKDGpu *>(simpleColorRampsBufferRing());
 
-    commandRecorder.copyBufferToTexture(BufferToTextureCopy{
-        .srcBuffer = simpleColorRampsBuffers.submittedBuffer(),
-        .dstTexture = m_gradientTexture,
-        .dstTextureLayout = TextureLayout::TransferDstOptimal,
-        .regions = {
-            BufferTextureCopyRegion{
-                .bufferOffset = desc.simpleGradDataOffsetInBytes,
-                .textureSubResource =
-                    TextureSubresourceLayers{
-                        .aspectMask = TextureAspectFlagBits::ColorBit,
-                    },
-                .textureExtent =
-                    {
-                        .width = desc.simpleGradTexelsWidth,
-                        .height = desc.simpleGradTexelsHeight,
-                        .depth = 1,
-                    },
-            },
-        }});
-  }
+  //   commandRecorder.copyBufferToTexture(BufferToTextureCopy{
+  //       .srcBuffer = simpleColorRampsBuffers.submittedBuffer(),
+  //       .dstTexture = m_gradientTexture,
+  //       .dstTextureLayout = TextureLayout::TransferDstOptimal,
+  //       .regions = {
+  //           BufferTextureCopyRegion{
+  //               .bufferOffset = desc.simpleGradDataOffsetInBytes,
+  //               .textureSubResource =
+  //                   TextureSubresourceLayers{
+  //                       .aspectMask = TextureAspectFlagBits::ColorBit,
+  //                   },
+  //               .textureExtent =
+  //                   {
+  //                       .width = desc.simpleGradTexelsWidth,
+  //                       .height = desc.simpleGradTexelsHeight,
+  //                       .depth = 1,
+  //                   },
+  //           },
+  //       }});
+  // }
 
   // Tessellate all curves into vertices in the tessellation texture.
   if (desc.tessVertexSpanCount > 0) {
@@ -1396,7 +1411,7 @@ void PLSRenderContextKDGpuImpl::flush(const FlushDescriptor &desc) {
   if (desc.colorLoadAction == LoadAction::clear) {
     loadOp = AttachmentLoadOperation::Clear;
     float cc[4];
-    UnpackColorToRGBA32F(desc.clearColor, cc);
+    UnpackColorToRGBA32F(desc.colorClearValue, cc);
     clearColor = ColorClearValue{.float32 = {cc[0], cc[1], cc[2], cc[3]}};
   } else {
     loadOp = AttachmentLoadOperation::Load;
@@ -1443,24 +1458,23 @@ void PLSRenderContextKDGpuImpl::flush(const FlushDescriptor &desc) {
         .layout = m_drawBindGroupLayouts[PLS_TEXTURE_BINDINGS_SET],
         .resources = {
             BindGroupEntry{
-                .binding = FRAMEBUFFER_PLANE_IDX,
+                .binding = COLOR_PLANE_IDX,
                 .resource =
                     TextureViewBinding{renderTarget->m_targetTextureView},
-            },
-            BindGroupEntry{
-                .binding = COVERAGE_PLANE_IDX,
-                .resource =
-                    TextureViewBinding{renderTarget->m_coverageTextureView},
             },
             BindGroupEntry{
                 .binding = CLIP_PLANE_IDX,
                 .resource = TextureViewBinding{renderTarget->m_clipTextureView},
             },
             BindGroupEntry{
-                .binding = ORIGINAL_DST_COLOR_PLANE_IDX,
+                .binding = SCRATCH_COLOR_PLANE_IDX,
                 .resource =
-                    TextureViewBinding{
-                        renderTarget->m_originalDstColorTextureView},
+                    TextureViewBinding{renderTarget->m_scratchColorTextureView},
+            },
+            BindGroupEntry{
+                .binding = COVERAGE_PLANE_IDX,
+                .resource =
+                    TextureViewBinding{renderTarget->m_coverageTextureView},
             },
         }}));
 
@@ -1491,7 +1505,7 @@ void PLSRenderContextKDGpuImpl::flush(const FlushDescriptor &desc) {
         drawPipeline.renderPipeline(renderTarget->framebufferFormat()));
 
     // set sampler bindings per-batch
-    drawPass.setBindGroup(SAMPLER_BINDINGS_SET, m_samplerBindings);
+    drawPass.setBindGroup(IMMUTABLE_SAMPLER_BINDINGS_SET, m_samplerBindings);
 
     // Bind the appropriate image texture, if any.
     if (auto *imageTexture =
@@ -1596,6 +1610,7 @@ void PLSRenderContextKDGpuImpl::flush(const FlushDescriptor &desc) {
 
       switch (drawType) {
       case DrawType::midpointFanPatches:
+      case DrawType::midpointFanCenterAAPatches:
       case DrawType::outerCurvePatches: {
         // Draw PLS patches that connect the tessellation vertices.
         drawPass.setVertexBuffer(0, m_patchVertexBuffer);
@@ -1609,7 +1624,8 @@ void PLSRenderContextKDGpuImpl::flush(const FlushDescriptor &desc) {
             .firstInstance = batch.baseElement,
         });
         break;
-      case DrawType::interiorTriangulation: {
+      case DrawType::interiorTriangulation:
+      case DrawType::atlasBlit: {
         drawPass.setVertexBuffer(
             0, static_cast<const BufferKDGpu *>(triangleBufferRing())
                    ->submittedBuffer());
@@ -1620,8 +1636,6 @@ void PLSRenderContextKDGpuImpl::flush(const FlushDescriptor &desc) {
         });
         break;
       }
-      case DrawType::imageRect:
-        RIVE_UNREACHABLE();
       case DrawType::imageMesh: {
         auto vertexBuffer =
             static_cast<const RenderBufferKDGpuImpl *>(batch.vertexBuffer);
@@ -1640,9 +1654,17 @@ void PLSRenderContextKDGpuImpl::flush(const FlushDescriptor &desc) {
         });
         break;
       }
-      case DrawType::plsAtomicInitialize:
-      case DrawType::plsAtomicResolve:
-      case DrawType::stencilClipReset:
+      case DrawType::imageRect:
+      case DrawType::atomicInitialize:
+      case DrawType::atomicResolve:
+      case DrawType::msaaStrokes:
+      case DrawType::msaaMidpointFanBorrowedCoverage:
+      case DrawType::msaaMidpointFans:
+      case DrawType::msaaMidpointFanStencilReset:
+      case DrawType::msaaMidpointFanPathsStencil:
+      case DrawType::msaaMidpointFanPathsCover:
+      case DrawType::msaaOuterCubics:
+      case DrawType::msaaStencilClipReset:
         RIVE_UNREACHABLE();
       }
       }

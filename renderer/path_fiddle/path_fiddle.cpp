@@ -833,7 +833,7 @@ void riveMainLoop()
         hotloadShaders = false;
 
 #ifndef RIVE_BUILD_FOR_IOS
-        std::system("sh rebuild_shaders.sh /tmp/rive");
+        auto&& _unused = std::system("sh rebuild_shaders.sh /tmp/rive");
 #endif
         fiddleContext->hotloadShaders();
     }
