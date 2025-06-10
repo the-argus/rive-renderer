@@ -40,16 +40,6 @@ if not _OPTIONS['with-webgpu'] then
             'path_fiddle/path_fiddle.cpp',
             'shader_hotload/**.cpp'
         })
-
-        filter('options:with_kdgpu')
-        do
-            files({ 'path_fiddle/fiddle_context_kdgpu.cpp' })
-            defines({ 'SPDLOG_FMT_EXTERNAL' })
-            cppdialect('C++20')
-            disablewarnings({ 'deprecated' })
-            links({ 'KDGpu', 'KDGui', 'fmt', 'shaderc_shared' })
-        end
-
         links({
             'rive',
             'rive_pls_renderer',
@@ -59,6 +49,14 @@ if not _OPTIONS['with-webgpu'] then
             'rive_sheenbidi',
             'rive_yoga',
         })
+        filter({ 'options:with_kdgpu' })
+        do
+            files({ 'path_fiddle/fiddle_context_kdgpu.cpp' })
+            defines({ 'SPDLOG_FMT_EXTERNAL' })
+            cppdialect('C++20')
+            disablewarnings({ 'deprecated' })
+            links({ 'KDGpu', 'KDGui', 'fmt', 'shaderc_shared' })
+        end
         filter({ 'options:not no_rive_png' })
         do
             links({ 'zlib', 'libpng' })
