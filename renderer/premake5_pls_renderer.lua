@@ -222,6 +222,10 @@ do
         disablewarnings({ 'deprecated' })
         links({ 'KDGpu', 'KDGui', 'fmt', 'shaderc_shared' })
         files({ 'src/kdgpu/render_context_kdgpu_impl.cpp' })
+        -- NOTE: always linking X11-xcb even if we are only compiling wayland
+        -- support
+        -- TODO: conditionally link x11-xcb
+        links({ 'glfw', 'X11-xcb' })
     end
 
     filter({ 'system:windows or macosx or linux' })
